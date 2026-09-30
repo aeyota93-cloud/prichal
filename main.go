@@ -30,7 +30,7 @@ type server struct {
 	upd    *Updates
 	auth   *Auth
 	hosts  map[string]bool // extra hostnames allowed besides localhost
-	locked string          // non-empty: exposed without a password, refuse to work
+	locked string          // non-empty: reachable from outside without a password; why
 }
 
 func env(k, def string) string {
@@ -88,12 +88,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	exposed, addr := exposure(ctx, d, selfID, listen)
 	cancel()
-	switch {
-	case exposed && !s.auth.Enabled():
-		s.locked = addr
-		log.Printf("ВНИМАНИЕ: панель доступна снаружи (%s) без пароля. Работа заблокирована: задайте PRICHAL_PASSWORD или привяжите порт к 127.0.0.1", addr)
-	case exposed:
+	s.locked = lockReason(exposed, addr, len(s.hosts) > 0, s.auth.Enabled())
+	if exposed && s.locked == "" {
 		log.Printf("панель доступна снаружи (%s), вход по паролю", addr)
+	}
+	if s.locked != "" {
+		log.Printf("ВНИМАНИЕ: работа заблокирована: %s. Задайте PRICHAL_PASSWORD в .env", s.locked)
 	}
 
 	if tg := NewTelegram(os.Getenv("TG_TOKEN"), os.Getenv("TG_USERNAME"), dataDir); tg != nil {
@@ -131,6 +131,22 @@ func main() {
 	}
 	log.Printf("Причал слушает %s", listen)
 	log.Fatal(srv.ListenAndServe())
+}
+
+// lockReason says why the panel must refuse to work, or "" if it may. It is
+// root-equivalent, so without a password it is only allowed on 127.0.0.1.
+// ALLOWED_HOSTS means a reverse proxy publishes it under a domain, where the
+// 127.0.0.1 binding no longer protects it.
+func lockReason(exposed bool, addr string, proxied, password bool) string {
+	switch {
+	case password:
+		return ""
+	case exposed:
+		return "её порт открыт наружу (" + addr + "), а пароль не задан"
+	case proxied:
+		return "задан ALLOWED_HOSTS (доступ через обратный прокси), а пароль не задан"
+	}
+	return ""
 }
 
 func (s *server) hostAllowed(host string) bool {
@@ -179,10 +195,11 @@ func (s *server) guard(next http.Handler) http.Handler {
 		if s.locked != "" && r.URL.Path != "/api/health" {
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("Причал заблокирован: его порт открыт наружу (" + s.locked + "), а пароль не задан.\n\n" +
+			w.Write([]byte("Причал заблокирован: " + s.locked + ".\n\n" +
 				"Панель управляет Docker и сервером, без пароля это опасно. Сделайте одно из двух:\n" +
-				"  1) привяжите порт к 127.0.0.1 (\"127.0.0.1:9443:9443\") и заходите через SSH-туннель;\n" +
-				"  2) задайте PRICHAL_PASSWORD в .env и перезапустите панель.\n"))
+				"  1) задайте PRICHAL_PASSWORD в .env и выполните docker compose up -d;\n" +
+				"  2) уберите ALLOWED_HOSTS, привяжите порт к 127.0.0.1 (\"127.0.0.1:9443:9443\")\n" +
+				"     и заходите через SSH-туннель.\n"))
 			return
 		}
 		if s.auth.Enabled() && !publicPaths[r.URL.Path] && !strings.HasPrefix(r.URL.Path, "/fonts/") && !s.auth.Valid(r) {

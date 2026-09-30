@@ -64,6 +64,23 @@ func TestHostAllowed(t *testing.T) {
 	}
 }
 
+func TestLockReason(t *testing.T) {
+	cases := []struct {
+		exposed, proxied, password bool
+		locked                     bool
+	}{
+		{false, false, false, false}, // 127.0.0.1 + SSH tunnel: fine without a password
+		{true, false, false, true},   // published port, no password
+		{false, true, false, true},   // reverse proxy (ALLOWED_HOSTS), no password
+		{true, true, true, false},    // anything goes with a password
+	}
+	for _, c := range cases {
+		if got := lockReason(c.exposed, "0.0.0.0:9443", c.proxied, c.password) != ""; got != c.locked {
+			t.Errorf("%+v: locked=%v", c, got)
+		}
+	}
+}
+
 func TestGuardAndLogin(t *testing.T) {
 	s := &server{hosts: map[string]bool{}, auth: NewAuth("secret")}
 	mux := http.NewServeMux()

@@ -41,9 +41,18 @@ if [ ! -f .env ]; then
 fi
 chmod 600 .env
 
+# Go needs roughly 500 MB of memory to build the panel.
+avail=$(awk '/^MemAvailable:/ {m=$2} /^SwapFree:/ {s=$2} END {print int((m+s)/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+if [ "${avail:-0}" -gt 0 ] && [ "$avail" -lt 600 ]; then
+  say "Внимание: свободно всего $avail МБ памяти вместе с подкачкой, сборка может не пройти."
+  say "Если она оборвётся, добавьте подкачку (swap) на 1-2 ГБ и запустите ./install.sh снова."
+fi
+
 say "== Собираю и запускаю Причал (первый раз это займёт пару минут)"
 docker compose up -d --build
+# Keep the disk tidy: the Go toolchain is only needed while building.
 docker image prune -f >/dev/null 2>&1 || true
+docker builder prune -f >/dev/null 2>&1 || true
 
 port=$(sed -n 's/^PRICHAL_PORT=\([0-9][0-9]*\).*/\1/p' .env | head -n1)
 port=${port:-9443}
@@ -60,6 +69,7 @@ done
 [ "$ok" = 1 ] || { docker logs --tail 20 prichal; fail "Причал не ответил. Журнал выше."; }
 
 addr=$(hostname -I 2>/dev/null | awk '{print $1}')
+[ -n "$addr" ] || addr=$(ip route get 1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}')
 say ""
 say "=== Причал работает на 127.0.0.1:$port ==="
 say "Откройте на своём компьютере SSH-туннель:"
