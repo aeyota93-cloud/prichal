@@ -1,0 +1,32 @@
+name: prichal
+
+services:
+  prichal:
+    build: .
+    image: prichal:local
+    container_name: prichal
+    restart: always
+    # Only reachable from the server itself, i.e. through an SSH tunnel.
+    # Publishing it on another address requires PRICHAL_PASSWORD in .env.
+    ports:
+      - "127.0.0.1:${PRICHAL_PORT:-9443}:9443"
+    env_file: .env # created by install.sh from .env.example
+    environment:
+      HOST_ROOT: /host
+      DATA_DIR: /data
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /:/host:ro # read-only: disk usage, hostname, update logs
+      - prichal-data:/data # labels, Telegram chat, last update task
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
+
+volumes:
+  prichal-data:

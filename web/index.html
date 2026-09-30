@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Причал</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="app.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<div class="page">
+
+  <header class="top">
+    <div class="brand">
+      <span class="brand-mark" data-icon="anchor-simple" aria-hidden="true"></span>
+      <div>
+        <p class="brand-name">Причал</p>
+        <p class="brand-host" id="host-label">Контейнеры на сервере</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <nav class="tabs" role="tablist" aria-label="Разделы">
+        <button class="tab" role="tab" id="tab-containers" aria-selected="true" aria-controls="view-containers">Контейнеры</button>
+        <button class="tab" role="tab" id="tab-conns" aria-selected="false" aria-controls="view-conns">Подключения</button>
+        <button class="tab" role="tab" id="tab-updates" aria-selected="false" aria-controls="view-updates">Обновления</button>
+        <button class="tab" role="tab" id="tab-images" aria-selected="false" aria-controls="view-images">Образы</button>
+      </nav>
+      <button class="btn btn-quiet" id="logout" hidden>Выйти</button>
+    </div>
+  </header>
+
+  <div class="offline" id="offline" hidden role="alert">
+    <span data-icon="wifi-slash" aria-hidden="true"></span>
+    <p><strong>Нет связи с панелью.</strong> Похоже, окно «Сервер» закрыто. Запустите его снова, страница обновится сама.</p>
+  </div>
+
+  <section class="host" id="host" hidden aria-label="Состояние сервера">
+    <div class="meter" id="m-cpu"><p class="meter-label">Процессор</p><p class="meter-value"></p><div class="meter-bar"><i></i></div><p class="meter-sub"></p></div>
+    <div class="meter" id="m-mem"><p class="meter-label">Память</p><p class="meter-value"></p><div class="meter-bar"><i></i></div><p class="meter-sub"></p></div>
+    <div class="meter" id="m-disk"><p class="meter-label">Диск</p><p class="meter-value"></p><div class="meter-bar"><i></i></div><p class="meter-sub"></p></div>
+    <div class="meter meter-plain" id="m-up"><p class="meter-label">Сервер работает</p><p class="meter-value"></p><p class="meter-sub"></p></div>
+  </section>
+
+  <main>
+    <section id="view-containers" role="tabpanel" aria-labelledby="tab-containers">
+      <div class="section-head">
+        <h1>Контейнеры</h1>
+        <p class="section-sum" id="ct-sum">Загружаю…</p>
+      </div>
+      <div class="ct-cols" aria-hidden="true">
+        <span>Состояние</span><span>Контейнер</span><span>Процессор</span><span>Память</span><span>Как долго</span>
+      </div>
+      <ul class="ct-list" id="ct-list"></ul>
+    </section>
+
+    <section id="view-conns" role="tabpanel" aria-labelledby="tab-conns" hidden>
+      <div class="section-head">
+        <h1>Подключения</h1>
+        <p class="section-sum" id="cn-sum">Загружаю…</p>
+      </div>
+      <div class="cn-list" id="cn-list"></div>
+    </section>
+
+    <section id="view-updates" role="tabpanel" aria-labelledby="tab-updates" hidden>
+      <div class="section-head">
+        <h1>Обновления</h1>
+        <p class="section-sum" id="up-sum">Загружаю…</p>
+      </div>
+      <div id="up-reboot"></div>
+      <div id="up-task"></div>
+      <section class="up-card" id="up-apps" hidden></section>
+      <section class="up-card" id="up-pkgs"></section>
+      <div class="up-foot" id="up-foot"></div>
+    </section>
+
+    <section id="view-images" role="tabpanel" aria-labelledby="tab-images" hidden>
+      <div class="section-head">
+        <h1>Образы</h1>
+        <p class="section-sum" id="im-sum">Загружаю…</p>
+      </div>
+      <div class="prune" id="prune"></div>
+      <ul class="im-list" id="im-list"></ul>
+    </section>
+  </main>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

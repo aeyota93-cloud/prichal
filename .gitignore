@@ -1,0 +1,11 @@
+# Build output and local deployment files
+/prichal
+/prichal-dev.exe
+/*.exe
+/deploy/
+/dist/
+
+# Secrets and local settings
+.env
+*.env
+!.env.example
