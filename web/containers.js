@@ -158,8 +158,9 @@ function renderDetails(r) {
   const c = r.c;
   const items = [];
   const add = (dt, dd, cls) => items.push(h('div', { class: cls }, h('dt', { text: dt }), h('dd', { text: dd })));
-  add('Образ', c.image);
-  add('Имя в Docker', c.name);
+  // Образ без :latest часто совпадает с именем: одна строка вместо двух одинаковых.
+  if (c.image.replace(/:latest$/, '') === c.name) add('Образ и имя', c.image);
+  else { add('Образ', c.image); add('Имя в Docker', c.name); }
   const started = parseTime(c.startedAt), finished = parseTime(c.finishedAt);
   if ((c.state === 'running' || c.state === 'paused') && started) add('Запущен', fullFmt.format(started));
   else if (finished) add('Остановлен', fullFmt.format(finished));

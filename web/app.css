@@ -95,6 +95,7 @@ ul { padding: 0; list-style: none; }
 .hero h1 { font-size: clamp(34px, 5vw, 58px); font-weight: 300; letter-spacing: -0.035em; line-height: 1.05; margin-top: 26px; overflow-wrap: anywhere; }
 .hero .sub { color: var(--ink-3); font-size: 16px; font-weight: 300; margin-top: 12px; }
 .hero .sub-more { color: var(--ink-3); font-size: 14px; margin-top: 6px; max-width: 640px; }
+.hero .ov-act { margin-top: 18px; }
 .sec { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin: 46px 0 16px; }
 .sec h2 { font-size: 15px; font-weight: 400; color: var(--ink-2); }
 .muted { color: var(--ink-2); }
@@ -438,6 +439,12 @@ body.is-offline .view { opacity: .5; }
 .login-form label { color: var(--ink-2); font-size: 14px; padding-left: 8px; }
 .login-form input { padding: 14px 20px; border-radius: 99px; border: 1px solid rgb(255 255 255 / .16); background: rgb(0 0 0 / .4); outline: none; }
 .login-form input:focus { border-color: var(--ink); }
+.login-form input[aria-invalid="true"] { border-color: var(--bad); }
+.pw { position: relative; }
+.pw input { width: 100%; padding-right: 52px; }
+.pw-eye { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 36px; height: 36px; border: 0; border-radius: 50%; background: none; color: var(--ink-2); cursor: pointer; display: grid; place-items: center; transition: background-color .2s, color .2s; }
+.pw-eye .ico { font-size: 20px; }
+.pw-eye:hover { background: rgb(255 255 255 / .1); color: var(--ink); }
 .login-form .pbtn { margin-top: 6px; }
 .login-error { color: var(--bad); font-size: 14px; padding-left: 8px; min-height: 1em; }
 .login-error:empty { display: none; }

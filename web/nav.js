@@ -1,10 +1,11 @@
 import { conns, loadConns } from './conns.js';
 import { loadImages } from './images.js';
 import { loadUpdates } from './updates.js';
+import { VIEWS } from './views.js';
 
 // ---------- Разделы ----------
 
-export const VIEWS = { overview: '#', containers: '#containers', conns: '#connections', updates: '#updates', images: '#images' };
+export { VIEWS };
 export let currentView = 'overview';
 
 export const viewFromHash = () => Object.keys(VIEWS).find(v => VIEWS[v] === location.hash) || 'overview';

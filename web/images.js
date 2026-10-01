@@ -64,10 +64,14 @@ function askPrune(unused, buildCache) {
   const list = unused.map(i => `${imgName(i)} (${fmtBytes(i.size)})`);
   if (buildCache) list.push(`кэш сборки (${fmtBytes(buildCache)})`);
   const back = () => renderImages(imgState.data);
+  // Один кэш сборки — это не удаление образов, красная кнопка тут пугала бы зря.
+  const onlyCache = unused.length === 0;
   $('#prune').append(confirmBox({
     q: 'Очистить неиспользуемое?',
-    text: `Будет удалено: ${list.join(', ')}. Образы, которые нужны контейнерам, останутся, даже если контейнер сейчас остановлен.`,
-    yes: 'Да, очистить', danger: true, onYes: doPrune, onNo: back,
+    text: `Будет удалено: ${list.join(', ')}. ` + (onlyCache
+      ? 'Образы и контейнеры не пострадают.'
+      : 'Образы, которые нужны контейнерам, останутся, даже если контейнер сейчас остановлен.'),
+    yes: 'Да, очистить', danger: !onlyCache, onYes: doPrune, onNo: back,
   }));
 }
 

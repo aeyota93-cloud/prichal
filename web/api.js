@@ -1,5 +1,7 @@
 // Запросы к серверу панели.
 
+import { VIEWS } from './views.js';
+
 export const POLL_MS = 3000;
 
 
@@ -12,7 +14,10 @@ export async function api(path, opts = {}) {
   }
   const res = await fetch(path, init);
   if (res.status === 401 && path !== '/api/login') {
-    location.href = '/login.html';
+    // Запоминаем раздел, чтобы после входа вернуться в него (только из белого списка).
+    const hash = location.hash;
+    const back = hash !== '#' && Object.values(VIEWS).includes(hash) ? `?next=${encodeURIComponent(hash)}` : '';
+    location.href = '/login.html' + back;
     throw new Error('нужно войти');
   }
   let data = null;

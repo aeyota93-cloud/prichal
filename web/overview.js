@@ -2,6 +2,7 @@ import { $, h, icon, pillRow } from './dom.js';
 import { fmtBytes, fmtPct, fmtDur, fmtWhen, plural, cap } from './format.js';
 import { about, statusOf } from './model.js';
 import { openContainer } from './containers.js';
+import { go } from './nav.js';
 import { conns, connCount, connBadge } from './conns.js';
 import { openTelegram } from './telegram.js';
 
@@ -103,11 +104,30 @@ export function renderOverview(ov) {
   }
   if (hv) sub.push(`${fmtDur(hv.uptime)} без перезагрузки`);
   $('#ov-sub').textContent = sub.join(' · ');
+  renderProblemBtn([...bad, ...warn]);
 
   renderTiles(list);
   renderTelegram(ov.telegram, ov.zone || 'МСК');
   renderEvents(ov.events || [], hv);
 }
+
+// Кнопка под заголовком, когда есть проблемные контейнеры: один открываем сразу,
+// если их несколько, ведём в «Контейнеры». Обновляем, только если что-то поменялось.
+let problemKey = '';
+let problemGo = null;
+function renderProblemBtn(problems) {
+  const one = problems.length === 1 ? problems[0] : null;
+  const label = !problems.length ? '' : one ? `Открыть ${about(one).title}` : 'Показать';
+  const key = `${one ? one.id : problems.length}|${label}`;
+  if (key === problemKey) return;
+  problemKey = key;
+  const btn = $('#ov-act');
+  btn.hidden = !label;
+  btn.textContent = label;
+  problemGo = one ? () => openContainer(one.id) : () => go('containers');
+}
+
+$('#ov-act').addEventListener('click', () => problemGo?.());
 
 export function sortContainers(list) {
   const collator = new Intl.Collator('ru');
