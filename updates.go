@@ -74,7 +74,8 @@ type Updates struct {
 	docker   *Docker
 	apps     *Apps
 	hostRoot string
-	state    string // path of updates.json in DATA_DIR ("" = memory only)
+	state    string   // path of updates.json in DATA_DIR ("" = memory only)
+	journal  *Journal // finished tasks go to the timeline
 
 	mu     sync.Mutex
 	list   *SystemView
@@ -469,11 +470,22 @@ func (u *Updates) Task(ctx context.Context) *Task {
 		u.docker.RemoveContainer(context.Background(), helperPrefix+"task-"+cp.ID)
 	}
 	u.mu.Lock()
+	changed := u.task != nil && u.task.ID == cp.ID && u.task.State == "running"
 	if u.task != nil && u.task.ID == cp.ID {
 		u.task = &cp
 		u.saveLocked()
 	}
 	u.mu.Unlock()
+	if changed && cp.Kind != "check" {
+		switch cp.State {
+		case "done":
+			u.journal.Add("ok", upperFirst(cp.Title)+": готово")
+		case "failed":
+			u.journal.Add("bad", upperFirst(cp.Title)+": ошибка")
+		default:
+			u.journal.Add("warn", upperFirst(cp.Title)+": прервано")
+		}
+	}
 	u.invalidate()
 	if cp.Kind == "app" || cp.Kind == "git" {
 		u.apps.Invalidate()
@@ -588,6 +600,7 @@ func (u *Updates) Reboot(ctx context.Context) error {
 		return err
 	}
 	log.Printf("updates: reboot requested")
+	u.journal.Add("", "Перезагрузка сервера из панели")
 	return nil
 }
 

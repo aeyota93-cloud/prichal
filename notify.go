@@ -16,10 +16,11 @@ import (
 )
 
 // Notifier watches Docker events and the host and reports problems to
-// Telegram: crashes, restart loops, unhealthy containers, out-of-memory kills,
-// recoveries, server reboots, low disk and low memory. Manual stops (a "kill"
-// right before "die", which is what docker stop / the panel do) are not
-// reported.
+// Telegram and to the panel's timeline: crashes, restart loops, unhealthy
+// containers, out-of-memory kills, recoveries, server reboots, low disk and
+// low memory. Manual stops (a "kill" right before "die", which is what docker
+// stop / the panel do) are not reported. Without Telegram it still fills the
+// timeline.
 
 var msk = time.FixedZone("МСК", 3*3600)
 
@@ -36,6 +37,7 @@ type Notifier struct {
 	tg       *Telegram
 	hostRoot string
 	upd      *Updates
+	journal  *Journal
 
 	mu       sync.Mutex
 	lastKill map[string]time.Time   // container id -> last kill event
@@ -44,9 +46,9 @@ type Notifier struct {
 	sent     map[string]time.Time   // dedupe key -> when
 }
 
-func NewNotifier(d *Docker, tg *Telegram, hostRoot string, upd *Updates) *Notifier {
+func NewNotifier(d *Docker, tg *Telegram, hostRoot string, upd *Updates, journal *Journal) *Notifier {
 	return &Notifier{
-		docker: d, tg: tg, hostRoot: hostRoot, upd: upd,
+		docker: d, tg: tg, hostRoot: hostRoot, upd: upd, journal: journal,
 		lastKill: map[string]time.Time{}, crashes: map[string][]time.Time{},
 		down: map[string]bool{}, sent: map[string]time.Time{},
 	}
@@ -57,23 +59,37 @@ func nice(name, image, service string) string {
 	return "<b>" + html.EscapeString(identify(name, image, service, false).Title) + "</b>"
 }
 
-func (n *Notifier) send(key, text string) {
+// send delivers text to Telegram unless the same key was sent recently.
+// It reports whether the event is new.
+func (n *Notifier) send(key, text string) bool {
 	n.mu.Lock()
 	if t, ok := n.sent[key]; ok && time.Since(t) < quietSameEvent {
 		n.mu.Unlock()
-		return
+		return false
 	}
 	n.sent[key] = time.Now()
 	n.mu.Unlock()
 	log.Printf("notify: %s", key)
-	n.tg.Send(text)
+	if n.tg != nil {
+		n.tg.Send(text)
+	}
+	return true
+}
+
+// report is send plus a short plain line for the panel's timeline.
+func (n *Notifier) report(key, tone, short, text string) {
+	if n.send(key, text) {
+		n.journal.Add(tone, short)
+	}
 }
 
 func (n *Notifier) Run(ctx context.Context) {
-	go n.tg.Run(ctx, func() { n.welcome(ctx) })
+	if n.tg != nil {
+		go n.tg.Run(ctx, func() { n.welcome(ctx) })
+	}
 	go n.bootCheck(ctx)
 	go n.hostLoop(ctx)
-	if n.upd != nil {
+	if n.upd != nil && n.tg != nil {
 		go n.digestLoop(ctx)
 	}
 	n.eventsLoop(ctx)
@@ -118,6 +134,7 @@ func (n *Notifier) handle(ctx context.Context, ev dockerEvent) {
 	}
 	a := ev.Actor.Attributes
 	name := nice(raw, a["image"], a["com.docker.compose.service"])
+	title := identify(raw, a["image"], a["com.docker.compose.service"], false).Title
 	now := time.Now()
 	switch {
 	case ev.Action == "kill":
@@ -129,7 +146,7 @@ func (n *Notifier) handle(ctx context.Context, ev dockerEvent) {
 		n.mu.Lock()
 		n.down[id] = true
 		n.mu.Unlock()
-		n.send("oom/"+id, fmt.Sprintf("🔴 %s: не хватило памяти, Docker выключил процесс внутри.", name))
+		n.report("oom/"+id, "bad", title+": не хватило памяти", fmt.Sprintf("🔴 %s: не хватило памяти, Docker выключил процесс внутри.", name))
 
 	case ev.Action == "die":
 		n.mu.Lock()
@@ -153,11 +170,11 @@ func (n *Notifier) handle(ctx context.Context, ev dockerEvent) {
 		n.mu.Unlock()
 		code := ev.Actor.Attributes["exitCode"]
 		if loop {
-			n.send("loop/"+id, fmt.Sprintf("🔴 %s падает снова и снова: %d раза за %d минут. Последний код выхода %s. Загляните в журнал в «Причале».",
+			n.report("loop/"+id, "bad", title+" падает снова и снова", fmt.Sprintf("🔴 %s падает снова и снова: %d раза за %d минут. Последний код выхода %s. Загляните в журнал в «Причале».",
 				name, len(recent), int(loopWindow.Minutes()), html.EscapeString(code)))
 			return
 		}
-		go n.afterCrash(ctx, id, name, code)
+		go n.afterCrash(ctx, id, name, title, code)
 
 	case ev.Action == "start":
 		n.mu.Lock()
@@ -166,7 +183,7 @@ func (n *Notifier) handle(ctx context.Context, ev dockerEvent) {
 		if wasDown {
 			// Recovery is confirmed a bit later so a restart loop doesn't
 			// produce "works again" every few seconds.
-			go n.confirmRecovery(ctx, id, name)
+			go n.confirmRecovery(ctx, id, name, title)
 		}
 
 	case strings.HasPrefix(ev.Action, "health_status"):
@@ -179,14 +196,14 @@ func (n *Notifier) handle(ctx context.Context, ev dockerEvent) {
 		n.mu.Unlock()
 		switch {
 		case status == "unhealthy":
-			n.send("unhealthy/"+id, fmt.Sprintf("🟠 %s нездоров: работает, но не проходит собственную проверку.", name))
+			n.report("unhealthy/"+id, "warn", title+" нездоров", fmt.Sprintf("🟠 %s нездоров: работает, но не проходит собственную проверку.", name))
 		case status == "healthy" && wasDown:
-			go n.confirmRecovery(ctx, id, name)
+			go n.confirmRecovery(ctx, id, name, title)
 		}
 	}
 }
 
-func (n *Notifier) afterCrash(ctx context.Context, id, name, code string) {
+func (n *Notifier) afterCrash(ctx context.Context, id, name, title, code string) {
 	select {
 	case <-ctx.Done():
 		return
@@ -194,20 +211,20 @@ func (n *Notifier) afterCrash(ctx context.Context, id, name, code string) {
 	}
 	in, err := n.docker.Inspect(ctx, id)
 	if err != nil {
-		n.send("crash/"+id, fmt.Sprintf("🔴 %s упал (код выхода %s) и, похоже, удалён.", name, html.EscapeString(code)))
+		n.report("crash/"+id, "bad", title+" упал и, похоже, удалён", fmt.Sprintf("🔴 %s упал (код выхода %s) и, похоже, удалён.", name, html.EscapeString(code)))
 		return
 	}
 	if in.State.Running {
-		n.send("crash/"+id, fmt.Sprintf("🟠 %s упал (код выхода %s). Docker сам его перезапустил, сейчас работает.", name, html.EscapeString(code)))
+		n.report("crash/"+id, "warn", title+" упал, Docker сам его перезапустил", fmt.Sprintf("🟠 %s упал (код выхода %s). Docker сам его перезапустил, сейчас работает.", name, html.EscapeString(code)))
 		n.mu.Lock()
 		delete(n.down, id) // already fine, no separate recovery message
 		n.mu.Unlock()
 		return
 	}
-	n.send("crash/"+id, fmt.Sprintf("🔴 %s упал (код выхода %s) и не работает. Запустить его можно в «Причале».", name, html.EscapeString(code)))
+	n.report("crash/"+id, "bad", title+" упал и не работает", fmt.Sprintf("🔴 %s упал (код выхода %s) и не работает. Запустить его можно в «Причале».", name, html.EscapeString(code)))
 }
 
-func (n *Notifier) confirmRecovery(ctx context.Context, id, name string) {
+func (n *Notifier) confirmRecovery(ctx context.Context, id, name, title string) {
 	select {
 	case <-ctx.Done():
 		return
@@ -222,7 +239,7 @@ func (n *Notifier) confirmRecovery(ctx context.Context, id, name string) {
 	delete(n.down, id)
 	n.mu.Unlock()
 	if wasDown {
-		n.send("ok/"+id, fmt.Sprintf("🟢 %s снова работает.", name))
+		n.report("ok/"+id, "ok", title+" снова работает", fmt.Sprintf("🟢 %s снова работает.", name))
 	}
 }
 
@@ -264,7 +281,10 @@ func (n *Notifier) containerSummary(ctx context.Context) string {
 
 func (n *Notifier) bootCheck(ctx context.Context) {
 	kernel := readKernel()
-	prev := n.tg.SwapKernel(kernel)
+	prev := ""
+	if n.tg != nil {
+		prev = n.tg.SwapKernel(kernel)
+	}
 	up := readUptime()
 	if up < 0 || up > 15*60 {
 		return // the panel restarted, not the server
@@ -280,11 +300,13 @@ func (n *Notifier) bootCheck(ctx context.Context) {
 	}
 	bootAt := time.Now().Add(-time.Duration(readUptime()) * time.Second).In(msk)
 	msg := fmt.Sprintf("🔄 Сервер перезагрузился в %s МСК.", bootAt.Format("15:04"))
+	short := "Сервер перезагрузился"
 	if prev != "" && prev != kernel {
+		short += ", новое ядро " + kernel
 		msg += fmt.Sprintf("\nЯдро обновлено: %s → %s.", html.EscapeString(prev), html.EscapeString(kernel))
 	}
 	msg += "\n" + n.containerSummary(ctx)
-	n.send("boot", msg)
+	n.report("boot", "", short, msg)
 }
 
 func (n *Notifier) hostLoop(ctx context.Context) {
@@ -303,10 +325,10 @@ func (n *Notifier) hostLoop(ctx context.Context) {
 			switch {
 			case pct >= 85 && !diskWarned:
 				diskWarned = true
-				n.send("disk", fmt.Sprintf("🟠 Диск заполнен на %.0f%%: свободно %s. Очистить неиспользуемое можно в «Причале», вкладка «Образы».", pct, humanBytes(total-used)))
+				n.report("disk", "warn", fmt.Sprintf("Диск заполнен на %.0f%%", pct), fmt.Sprintf("🟠 Диск заполнен на %.0f%%: свободно %s. Очистить неиспользуемое можно в «Причале», вкладка «Образы».", pct, humanBytes(total-used)))
 			case pct < 80 && diskWarned:
 				diskWarned = false
-				n.send("disk-ok", fmt.Sprintf("🟢 Место на диске освободилось: занято %.0f%%.", pct))
+				n.report("disk-ok", "ok", "Место на диске освободилось", fmt.Sprintf("🟢 Место на диске освободилось: занято %.0f%%.", pct))
 			}
 		}
 		if mem, err := readKV("/proc/meminfo"); err == nil && mem["MemTotal"] > 0 {
@@ -319,10 +341,10 @@ func (n *Notifier) hostLoop(ctx context.Context) {
 			switch {
 			case lowMem >= 3 && !memWarned:
 				memWarned = true
-				n.send("mem", fmt.Sprintf("🟠 Заканчивается память: свободно %.0f%% уже несколько минут. Кто сколько ест, видно в «Причале».", free))
+				n.report("mem", "warn", "Заканчивается память", fmt.Sprintf("🟠 Заканчивается память: свободно %.0f%% уже несколько минут. Кто сколько ест, видно в «Причале».", free))
 			case free > 15 && memWarned:
 				memWarned = false
-				n.send("mem-ok", "🟢 С памятью снова всё нормально.")
+				n.report("mem-ok", "ok", "С памятью снова всё нормально", "🟢 С памятью снова всё нормально.")
 			}
 		}
 	}

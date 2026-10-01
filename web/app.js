@@ -72,8 +72,19 @@ function fmtAgo(sec) {
 }
 
 const dateFmt = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+const hmFmt = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit' });
 const timeFmt = new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 const fullFmt = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'medium', timeStyle: 'medium' });
+
+// «09:56», «вчера, 23:10» или «28 сент., 12:00».
+function fmtWhen(ms) {
+  const d = new Date(ms), now = new Date();
+  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((day(now) - day(d)) / 86400000);
+  if (diff === 0) return hmFmt.format(d);
+  if (diff === 1) return `вчера, ${hmFmt.format(d)}`;
+  return dateFmt.format(d);
+}
 
 function parseTime(s) {
   if (!s || s.startsWith('0001-')) return null;
@@ -87,6 +98,8 @@ function plural(n, one, few, many) {
   if (a >= 2 && a <= 4 && (b < 12 || b > 14)) return few;
   return many;
 }
+
+const cap = s => s ? s[0].toUpperCase() + s.slice(1) : s;
 
 // ---------- Что за контейнер ----------
 
@@ -109,18 +122,18 @@ function crashed(c) {
 function statusOf(c) {
   switch (c.state) {
     case 'running':
-      if (c.health === 'unhealthy') return { tone: 'bad', icon: 'warning-circle', label: 'Нездоров' };
-      if (c.health === 'starting') return { tone: 'warn', icon: 'clock', label: 'Запускается' };
-      return { tone: 'ok', icon: 'play-circle', label: 'Работает' };
-    case 'paused': return { tone: 'warn', icon: 'pause-circle', label: 'На паузе' };
-    case 'restarting': return { tone: 'bad', icon: 'arrows-clockwise', label: 'Перезапускается' };
+      if (c.health === 'unhealthy') return { tone: 'bad', label: 'Нездоров' };
+      if (c.health === 'starting') return { tone: 'warn', label: 'Запускается' };
+      return { tone: 'ok', label: 'Работает' };
+    case 'paused': return { tone: 'warn', label: 'На паузе' };
+    case 'restarting': return { tone: 'bad', label: 'Перезапускается' };
     case 'exited':
-      if (c.oomKilled) return { tone: 'bad', icon: 'warning-circle', label: 'Не хватило памяти' };
-      if (crashed(c)) return { tone: 'bad', icon: 'warning-circle', label: 'Упал' };
-      return { tone: 'idle', icon: 'stop-circle', label: 'Остановлен' };
-    case 'created': return { tone: 'idle', icon: 'stop-circle', label: 'Не запускался' };
-    case 'dead': return { tone: 'bad', icon: 'warning-circle', label: 'Сломан' };
-    default: return { tone: 'idle', icon: 'clock', label: c.state };
+      if (c.oomKilled) return { tone: 'bad', label: 'Не хватило памяти' };
+      if (crashed(c)) return { tone: 'bad', label: 'Упал' };
+      return { tone: 'idle', label: 'Остановлен' };
+    case 'created': return { tone: 'idle', label: 'Не запускался' };
+    case 'dead': return { tone: 'bad', label: 'Сломан' };
+    default: return { tone: 'idle', label: c.state };
   }
 }
 
@@ -130,7 +143,7 @@ const ACTIONS = {
   restart: { label: 'Перезапустить', icon: 'arrow-clockwise', busy: 'Перезапускаю…', done: 'перезапущен', verb: 'перезапустить', confirm: 'Да, перезапустить' },
   pause:   { label: 'Пауза', icon: 'pause', busy: 'Ставлю на паузу…', done: 'на паузе', verb: 'поставить на паузу', confirm: 'Да, на паузу' },
   stop:    { label: 'Остановить', icon: 'stop', busy: 'Останавливаю…', done: 'остановлен', verb: 'остановить', confirm: 'Да, остановить', danger: true },
-  kill:    { label: 'Принудительно остановить', icon: 'lightning', busy: 'Останавливаю…', done: 'остановлен принудительно', verb: 'принудительно остановить', confirm: 'Да, остановить сразу', danger: true },
+  kill:    { label: 'Остановить принудительно', icon: 'lightning', busy: 'Останавливаю…', done: 'остановлен принудительно', verb: 'принудительно остановить', confirm: 'Да, остановить сразу', danger: true },
 };
 
 function availableActions(c) {
@@ -189,7 +202,7 @@ async function api(path, opts = {}) {
   return data;
 }
 
-// ---------- Уведомления ----------
+// ---------- Всплывающие сообщения и подтверждения ----------
 
 function toast(text, bad = false) {
   const el = h('div', { class: 'toast' + (bad ? ' is-bad' : '') }, icon(bad ? 'warning-circle' : 'check-circle'), h('p', { text }));
@@ -197,47 +210,200 @@ function toast(text, bad = false) {
   setTimeout(() => el.remove(), bad ? 9000 : 4500);
 }
 
+function confirmBox({ q, text, yes, danger, onYes, onNo }) {
+  const qEl = h('p', { class: 'confirm-q', tabindex: '-1', text: q });
+  const box = h('div', { class: 'confirm', 'data-tone': danger ? 'bad' : null, onkeydown: e => { if (e.key === 'Escape') onNo(); } },
+    qEl,
+    h('p', { class: 'confirm-text', text }),
+    h('div', { class: 'row' },
+      h('button', { class: 'pbtn sm ' + (danger ? 'danger' : 'white'), onclick: onYes }, yes),
+      h('button', { class: 'pbtn sm ghost', onclick: onNo }, 'Отмена')));
+  setTimeout(() => qEl.focus());
+  return box;
+}
+
+const dots = n => h('span', { class: 'dots', 'aria-hidden': 'true' }, Array.from({ length: n }, () => h('i')));
+
+// Строка-таблетка: черта, подпись, точки и что-то справа.
+function pillRow(lead, end, tone) {
+  return h('div', { class: 'pill-row glass', 'data-tone': tone || null },
+    h('span', { class: 'lead', text: lead }), dots(6), h('div', { class: 'end' }, end));
+}
+
 // ---------- Состояние сервера ----------
 
 let hostMem = 0;
+let lastOverview = null;
+const cpuHist = []; // {t, cpu}: загрузка процессора за последние пару минут
 
-function setMeter(id, value, frac, sub) {
+function trackCpu(cpu) {
+  const now = Date.now();
+  if (cpuHist.length && now - cpuHist.at(-1).t > 30000) cpuHist.length = 0; // долго не смотрели
+  if (cpu != null) cpuHist.push({ t: now, cpu });
+  while (cpuHist.length > 40) cpuHist.shift();
+}
+
+function setMeter(id, frac, value, caption, tone) {
   const m = document.getElementById(id);
-  m.querySelector('.meter-value').textContent = value;
-  m.querySelector('.meter-sub').textContent = sub;
-  const bar = m.querySelector('.meter-bar i');
-  if (bar) bar.style.transform = `scaleX(${Math.min(1, Math.max(0, frac))})`;
-  m.classList.toggle('is-high', frac >= 0.8 && frac < 0.92);
-  m.classList.toggle('is-crit', frac >= 0.92);
+  m.style.setProperty('--v', Math.min(1, Math.max(0, frac)).toFixed(3));
+  m.dataset.tone = tone || '';
+  m.querySelector('.m-val').textContent = value;
+  document.getElementById(id + '-cap').textContent = caption;
+}
+
+function meterTone(frac, warn, bad) {
+  return frac >= bad ? 'bad' : frac >= warn ? 'warn' : '';
+}
+
+// У памяти и диска на дорожке просто точки, у процессора точки рисуют
+// последние пару минут: чем выше точка, тем выше была загрузка.
+function renderTrack(id, values) {
+  const tr = document.querySelector(`#${id} .m-track`);
+  const n = values ? Math.min(values.length, 24) : 7;
+  if (tr.children.length !== n) tr.replaceChildren(...Array.from({ length: n }, () => h('i')));
+  if (!values) return;
+  const v = values.slice(-n);
+  const max = Math.max(10, ...v);
+  [...tr.children].forEach((d, i) => {
+    d.style.transform = `translateY(${((0.5 - v[i] / max) * 18).toFixed(1)}px)`;
+    d.style.opacity = (0.35 + 0.65 * (i + 1) / n).toFixed(2);
+  });
 }
 
 function renderHost(hv) {
-  const box = $('#host');
-  if (!hv) { box.hidden = true; return; }
-  box.hidden = false;
+  if (!hv) return;
   hostMem = hv.memTotal;
+  trackCpu(hv.cpu);
+  const vals = cpuHist.map(p => p.cpu);
   const cpu = hv.cpu;
-  setMeter('m-cpu', cpu == null ? '…' : fmtPct(cpu), (cpu || 0) / 100,
-    `${hv.cpus} ${plural(hv.cpus, 'ядро', 'ядра', 'ядер')}`);
-  setMeter('m-mem', fmtPct(hv.memUsed / hv.memTotal * 100), hv.memUsed / hv.memTotal,
-    `${fmtBytes(hv.memUsed)} из ${fmtBytes(hv.memTotal)}` + (hv.swapTotal ? ` · подкачка ${fmtBytes(hv.swapUsed)}` : ''));
+  setMeter('m-cpu', (cpu || 0) / 100, cpu == null ? '…' : fmtPct(cpu),
+    vals.length > 3 ? `пик за ${Math.max(1, Math.round((cpuHist.at(-1).t - cpuHist[0].t) / 60000))} мин — ${fmtPct(Math.max(...vals))}` : `${hv.cpus} ${plural(hv.cpus, 'ядро', 'ядра', 'ядер')}`,
+    meterTone((cpu || 0) / 100, 0.8, 0.95));
+  renderTrack('m-cpu', vals.length > 1 ? vals : null);
+  const mem = hv.memUsed / hv.memTotal;
+  setMeter('m-mem', mem, fmtPct(mem * 100),
+    `${fmtBytes(hv.memUsed)} из ${fmtBytes(hv.memTotal)}` + (hv.swapTotal ? ` · подкачка ${fmtBytes(hv.swapUsed)}` : ''),
+    meterTone(mem, 0.8, 0.92));
+  renderTrack('m-mem');
   if (hv.diskTotal) {
-    setMeter('m-disk', fmtPct(hv.diskUsed / hv.diskTotal * 100), hv.diskUsed / hv.diskTotal,
-      `${fmtBytes(hv.diskUsed)} из ${fmtBytes(hv.diskTotal)}`);
+    const disk = hv.diskUsed / hv.diskTotal;
+    setMeter('m-disk', disk, fmtPct(disk * 100), `${fmtBytes(hv.diskUsed)} из ${fmtBytes(hv.diskTotal)}`, meterTone(disk, 0.8, 0.85));
+  } else {
+    setMeter('m-disk', 0, '—', 'нет данных');
   }
-  const up = document.getElementById('m-up');
-  up.querySelector('.meter-value').textContent = fmtDur(hv.uptime);
-  up.querySelector('.meter-sub').textContent = `с ${dateFmt.format(Date.now() - hv.uptime * 1000)}`;
+  renderTrack('m-disk');
+}
+
+// ---------- Обзор ----------
+
+function onlineTotal() {
+  let n = 0;
+  for (const s of conns.values()) if (s.state === 'running' && !s.error) n += connCount(s).online;
+  return n;
+}
+
+function renderOverview(ov) {
+  const list = ov.containers;
+  const hv = ov.host;
+  const bad = list.filter(c => statusOf(c).tone === 'bad');
+  const warn = list.filter(c => statusOf(c).tone === 'warn');
+  const running = list.filter(c => c.state === 'running').length;
+  const mem = hv ? hv.memUsed / hv.memTotal : 0;
+  const disk = hv && hv.diskTotal ? hv.diskUsed / hv.diskTotal : 0;
+
+  let title, tone = '';
+  if (bad.length === 1) { title = `${about(bad[0]).title}: ${statusOf(bad[0]).label.toLowerCase()}`; tone = 'bad'; }
+  else if (bad.length) { title = `Проблемы у ${bad.length} ${plural(bad.length, 'контейнера', 'контейнеров', 'контейнеров')}`; tone = 'bad'; }
+  else if (disk >= 0.85) { title = 'Заканчивается место на диске'; tone = 'warn'; }
+  else if (mem >= 0.92) { title = 'Заканчивается память'; tone = 'warn'; }
+  else if (warn.length) { title = `${about(warn[0]).title}: ${statusOf(warn[0]).label.toLowerCase()}`; tone = 'warn'; }
+  else if (!list.length) title = 'Контейнеров пока нет';
+  else title = 'Всё работает спокойно';
+  $('#ov-title').textContent = title;
+  $('#ov-live').dataset.tone = tone;
+
+  const sub = [`${running} из ${list.length} ${plural(list.length, 'контейнера', 'контейнеров', 'контейнеров')} работают`];
+  if (conns.size) {
+    const n = onlineTotal();
+    sub.push(n ? `${n} ${plural(n, 'устройство', 'устройства', 'устройств')} на связи` : 'никого на связи');
+  }
+  if (hv) sub.push(`${fmtDur(hv.uptime)} без перезагрузки`);
+  $('#ov-sub').textContent = sub.join(' · ');
+
+  renderTiles(list);
+  renderTelegram(ov.telegram);
+  renderEvents(ov.events || [], hv);
+}
+
+function sortContainers(list) {
+  const collator = new Intl.Collator('ru');
+  return [...list].sort((x, y) => (x.self - y.self) || collator.compare(about(x).title, about(y).title));
+}
+
+// Перерисовываем, только когда что-то поменялось: иначе каждые 3 секунды
+// сбивался бы фокус с плитки.
+let tilesKey = '';
+function renderTiles(list) {
+  const tiles = sortContainers(list).map(c => {
+    const a = about(c), st = statusOf(c);
+    return {
+      id: c.id, tone: st.tone, title: a.title,
+      sub: (st.tone === 'ok' ? (connBadge(c.name) || a.sub) : st.label.toLowerCase()) || ' ',
+      mem: c.state === 'running' || c.state === 'paused' ? fmtBytes(c.mem) : '',
+    };
+  });
+  const key = JSON.stringify(tiles);
+  if (key === tilesKey) return;
+  tilesKey = key;
+  $('#tiles').replaceChildren(...tiles.map(t => h('button', { class: 'tile glass', 'data-tone': t.tone, onclick: () => openContainer(t.id) },
+    h('span', { class: 'sdot' }),
+    h('div', {}, h('p', { text: t.title }), h('p', { text: t.sub })),
+    h('span', { class: 'num', text: t.mem }))));
+}
+
+const TG_REASONS = ['контейнер упал или перезапускается по кругу', 'сервер перезагрузился', 'диск заполнен на 85 %', 'свободной памяти меньше 8 %', 'сводка обновлений по воскресеньям в 12:00 МСК'];
+
+let tgShown = null;
+function renderTelegram(user) {
+  if (tgShown === (user || '')) return;
+  tgShown = user || '';
+  if (user) {
+    $('#tg-row').replaceChildren(pillRow('Telegram', h('span', { class: 'state' }, `@${user}`, h('span', { class: 'knob', 'aria-label': 'включены' }))));
+    $('#tg-tags').replaceChildren(...TG_REASONS.map(t => h('span', { class: 'tag', text: t })));
+  } else {
+    $('#tg-row').replaceChildren(pillRow('Telegram', h('span', { class: 'state' }, 'выключены', h('span', { class: 'knob off' }))));
+    $('#tg-tags').replaceChildren(h('p', { class: 'hint' }, 'Чтобы бот писал о сбоях, задайте ', h('code', { text: 'TG_TOKEN' }), ' и ', h('code', { text: 'TG_USERNAME' }), ' в файле .env на сервере.'));
+  }
+}
+
+let eventsKey = '';
+function renderEvents(events, hv) {
+  const list = events.map(e => ({ t: e.t * 1000, text: e.text, tone: e.tone }));
+  if (hv) {
+    // Запуск сервера знаем всегда, даже если журнал его не застал.
+    const boot = Date.now() - hv.uptime * 1000;
+    if (!list.some(e => Math.abs(e.t - boot) < 15 * 60000 && /перезагру/.test(e.text))) {
+      list.push({ t: boot, text: 'Сервер запущен', tone: '' });
+    }
+  }
+  list.sort((a, b) => b.t - a.t);
+  const key = JSON.stringify(list.slice(0, 6).map(e => [fmtWhen(e.t), e.text, e.tone]));
+  if (key === eventsKey) return;
+  eventsKey = key;
+  const box = $('#events');
+  if (!list.length) { box.replaceChildren(h('p', { class: 'ev-empty', text: 'Пока ничего не происходило.' })); return; }
+  box.replaceChildren(...list.slice(0, 6).map(e => h('div', { class: 'ev', 'data-tone': e.tone || null },
+    h('b', { text: fmtWhen(e.t) }), h('span', { text: e.text }))));
 }
 
 // ---------- Мини-график процессора ----------
 
 function spark(history) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
   svg.classList.add('spark');
   svg.setAttribute('viewBox', '0 0 72 24');
   svg.setAttribute('preserveAspectRatio', 'none');
-  const ns = 'http://www.w3.org/2000/svg';
   const base = document.createElementNS(ns, 'line');
   base.setAttribute('class', 'base');
   base.setAttribute('x1', 0); base.setAttribute('x2', 72); base.setAttribute('y1', 23); base.setAttribute('y2', 23);
@@ -255,7 +421,7 @@ function spark(history) {
   const pl = document.createElementNS(ns, 'polyline');
   pl.setAttribute('points', line);
   const dot = document.createElementNS(ns, 'circle');
-  dot.setAttribute('cx', pts.at(-1)[0]); dot.setAttribute('cy', pts.at(-1)[1]); dot.setAttribute('r', 2);
+  dot.setAttribute('cx', pts.at(-1)[0]); dot.setAttribute('cy', pts.at(-1)[1]); dot.setAttribute('r', 1.8);
   const title = document.createElementNS(ns, 'title');
   const mins = Math.max(1, Math.round((history.at(-1).t - history[0].t) / 60000));
   title.textContent = `Процессор за ${mins} мин: сейчас ${fmtPct(vals.at(-1))}, максимум ${fmtPct(Math.max(...vals))}`;
@@ -265,24 +431,25 @@ function spark(history) {
 
 // ---------- Контейнеры ----------
 
-const rows = new Map(); // id -> {el, c, parts, open, mode, logs}
-let lastOverview = null;
+const rows = new Map(); // id -> {el, c, open, mode, ...}
+let ctFilter = 'all';
+
+const isNet = c => ['vpn', 'proxy'].includes(about(c).kind);
 
 function makeRow(c) {
   const r = { c, open: false, mode: 'idle', actionsKey: '' };
-  r.pill = h('span', { class: 'pill' });
   r.title = h('p', { class: 'ct-title' });
   r.tech = h('p', { class: 'ct-tech' });
   r.cpu = h('div', { class: 'ct-cpu' });
-  r.mem = h('div', { class: 'num' });
-  r.time = h('div', { class: 'ct-time' });
+  r.mem = h('div', { class: 'ct-mem num' });
+  r.time = h('div', { class: 'ct-time num' });
   r.toggle = h('button', { class: 'ct-row', 'aria-expanded': 'false', onclick: () => setOpen(r, !r.open) },
-    h('div', {}, r.pill),
+    h('span', { class: 'sdot' }),
     h('div', {}, r.title, r.tech),
     r.cpu, r.mem, r.time,
     h('span', { class: 'ct-caret' }, icon('caret-down')));
   r.body = h('div', { class: 'ct-body', hidden: true });
-  r.el = h('li', { class: 'ct' }, r.toggle, r.body);
+  r.el = h('li', { class: 'ct glass' }, r.toggle, r.body);
   return r;
 }
 
@@ -291,11 +458,11 @@ function updateRow(r, c) {
   const a = about(c);
   const st = statusOf(c);
   r.el.dataset.tone = st.tone;
-  r.pill.dataset.tone = st.tone;
-  r.pill.replaceChildren(icon(st.icon), st.label);
+  r.toggle.dataset.tone = st.tone;
   const sub = [a.sub, connBadge(c.name)].filter(Boolean).join(' · ');
   r.title.replaceChildren(a.title, sub ? h('small', { text: sub }) : '');
-  r.tech.textContent = [...new Set([c.name, c.image.replace(/:latest$/, '')])].filter(s => s !== a.title).join(' · ') || c.image;
+  const tech = [...new Set([c.name, c.image.replace(/:latest$/, '')])].filter(s => s !== a.title).join(' · ') || c.image;
+  r.tech.replaceChildren(st.tone !== 'ok' ? h('span', { class: 'ct-state', text: `${st.label} · ` }) : '', tech);
   r.toggle.setAttribute('aria-label', `${a.title}, ${st.label.toLowerCase()}. Показать подробности`);
 
   const live = c.state === 'running' || c.state === 'paused';
@@ -334,6 +501,17 @@ function setOpen(r, open) {
   }
 }
 
+// С обзора: открыть раздел и раскрыть нужный контейнер.
+function openContainer(id) {
+  ctFilter = 'all';
+  applyFilter();
+  go('containers');
+  const r = rows.get(id);
+  if (!r) return;
+  if (!r.open) setOpen(r, true);
+  r.el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+
 function buildBody(r) {
   r.built = true;
   r.actions = h('div', { class: 'ct-actions' });
@@ -351,15 +529,13 @@ function buildBody(r) {
       },
     })));
   const follow = h('input', { type: 'checkbox', checked: true, onchange: e => { r.follow = e.target.checked; if (r.follow) loadLogs(r, true); } });
-  r.clients = h('section', { class: 'ct-clients', hidden: true });
-  r.body.append(
-    r.actions, r.details, r.clients,
-    h('div', { class: 'logs-head' },
-      h('h2', { text: 'Журнал' }),
-      seg,
-      h('label', { class: 'toggle' }, follow, 'Обновлять сам'),
-      h('button', { class: 'btn btn-quiet', onclick: () => loadLogs(r, true) }, icon('arrows-clockwise'), 'Обновить')),
-    r.logBox);
+  r.clients = h('section', { hidden: true });
+  r.logHead = h('div', { class: 'logs-head' },
+    h('h3', { text: 'Журнал' }),
+    seg,
+    h('label', { class: 'check' }, follow, 'обновлять сам'),
+    h('button', { class: 'textbtn', onclick: () => loadLogs(r, true) }, icon('arrows-clockwise'), 'Обновить'));
+  r.body.append(r.actions, r.details, r.clients, h('div', {}, r.logHead, r.logBox));
 }
 
 function renderDetails(r) {
@@ -385,6 +561,10 @@ function renderDetails(r) {
   r.details.replaceChildren(...items);
 }
 
+function actButton(d, cls, onclick, label) {
+  return h('button', { class: 'act' + (cls ? ' ' + cls : ''), onclick }, h('span', { class: 'rb' }, icon(d.icon)), label || d.label);
+}
+
 function renderActions(r, force = false) {
   if (r.mode !== 'idle' && !force) return;
   const acts = availableActions(r.c);
@@ -394,9 +574,10 @@ function renderActions(r, force = false) {
   r.mode = 'idle';
   const kids = acts.map((act, i) => {
     const d = ACTIONS[act];
-    const primary = i === 0 && (act === 'start' || act === 'unpause');
-    return h('button', { class: 'btn' + (primary ? ' btn-primary' : ''), onclick: () => ask(r, act) }, icon(d.icon), d.label);
+    return actButton(d, i === 0 ? 'primary' : d.danger && act === 'kill' ? 'danger' : '', () => ask(r, act));
   });
+  kids.push(h('span', { class: 'act-sep', 'aria-hidden': 'true' }),
+    actButton({ icon: 'scroll' }, '', () => { r.logBox.scrollIntoView({ block: 'center', behavior: 'smooth' }); r.logBox.focus({ preventScroll: true }); }, 'Журнал'));
   if (r.c.self) kids.push(h('p', { class: 'ct-note', text: 'Это сама панель: выключить её отсюда нельзя, только перезапустить.' }));
   r.actions.replaceChildren(...kids);
 }
@@ -406,30 +587,23 @@ function ask(r, act) {
   if (!d.confirm) return run(r, act);
   r.mode = 'confirm';
   const a = about(r.c);
-  const q = h('p', { class: 'confirm-q', tabindex: '-1', text: `${d.verb[0].toUpperCase()}${d.verb.slice(1)} ${a.title}?` });
   const cancel = () => { renderActions(r, true); r.actions.querySelector('button')?.focus(); };
-  const box = h('div', { class: 'confirm', 'data-tone': d.danger ? 'bad' : null, onkeydown: e => { if (e.key === 'Escape') cancel(); } },
-    q,
-    h('p', { class: 'confirm-text', text: confirmText(r.c, act) }),
-    h('div', { class: 'row' },
-      h('button', { class: 'btn ' + (d.danger ? 'btn-danger' : 'btn-primary'), onclick: () => run(r, act) }, icon(d.icon), d.confirm),
-      h('button', { class: 'btn', onclick: cancel }, 'Отмена')));
-  r.actions.replaceChildren(box);
-  q.focus();
+  r.actions.replaceChildren(confirmBox({
+    q: `${cap(d.verb)} ${a.title}?`, text: confirmText(r.c, act), yes: d.confirm, danger: d.danger,
+    onYes: () => run(r, act), onNo: cancel,
+  }));
 }
 
 async function run(r, act) {
   const d = ACTIONS[act];
   const a = about(r.c);
   r.mode = 'busy';
-  r.actions.replaceChildren(h('button', { class: 'btn is-busy', disabled: true }, icon('arrows-clockwise'), d.busy));
+  const busy = actButton({ icon: 'arrows-clockwise' }, 'is-busy', null, d.busy);
+  busy.disabled = true;
+  r.actions.replaceChildren(busy);
   try {
     await api(`/api/containers/${r.c.id}/${act}`, { method: 'POST' });
-    if (r.c.self) {
-      toast('Панель перезапускается, через пару секунд всё вернётся.');
-    } else {
-      toast(`${a.title} ${d.done}`);
-    }
+    toast(r.c.self ? 'Панель перезапускается, через пару секунд всё вернётся.' : `${a.title} ${d.done}`);
   } catch (e) {
     toast(`Не получилось ${d.verb} ${a.title}. Docker ответил: ${e.message}`, true);
   }
@@ -473,7 +647,7 @@ async function loadLogs(r, now = false) {
   }
 }
 
-// ---------- Сводка и обновление ----------
+// ---------- Список и фильтр ----------
 
 function renderSummary(list) {
   const n = { ok: 0, paused: 0, idle: 0, bad: 0 };
@@ -485,17 +659,32 @@ function renderSummary(list) {
     else n.ok++;
   }
   const parts = [];
-  if (n.ok) parts.push(`работают: ${n.ok}`);
+  if (n.ok) parts.push(`${n.ok} из ${list.length} работают`);
   if (n.paused) parts.push(`на паузе: ${n.paused}`);
   if (n.idle) parts.push(`остановлены: ${n.idle}`);
   if (n.bad) parts.push(`с проблемами: ${n.bad}`);
   $('#ct-sum').textContent = list.length ? parts.join(', ') : 'Контейнеров нет';
+  $('#ct-chip').dataset.tone = n.bad ? 'bad' : n.paused ? 'warn' : '';
+  $('#n-containers').textContent = list.length || '';
 }
+
+function applyFilter() {
+  const all = [...rows.values()];
+  const net = all.filter(r => isNet(r.c)).length;
+  $('#f-all').textContent = all.length;
+  $('#f-net').textContent = net;
+  $('#f-apps').textContent = all.length - net;
+  $('#ct-filter').hidden = !net || net === all.length;
+  if ($('#ct-filter').hidden) ctFilter = 'all';
+  $('#ct-filter').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.filter === ctFilter)));
+  for (const r of all) r.el.hidden = ctFilter === 'net' ? !isNet(r.c) : ctFilter === 'apps' ? isNet(r.c) : false;
+}
+
+$('#ct-filter').querySelectorAll('button').forEach(b => b.addEventListener('click', () => { ctFilter = b.dataset.filter; applyFilter(); }));
 
 function renderContainers(list) {
   for (const c of list) identities.set(c.name, { title: c.title, sub: c.sub, kind: c.kind });
-  const collator = new Intl.Collator('ru');
-  const sorted = [...list].sort((x, y) => (x.self - y.self) || collator.compare(about(x).title, about(y).title));
+  const sorted = sortContainers(list);
   const ul = $('#ct-list');
   const seen = new Set();
   for (const c of sorted) {
@@ -508,7 +697,10 @@ function renderContainers(list) {
   const want = sorted.map(c => rows.get(c.id).el);
   if (want.some((el, i) => ul.children[i] !== el)) ul.replaceChildren(...want);
   renderSummary(list);
+  applyFilter();
 }
+
+// ---------- Опрос ----------
 
 let pollTimer = null;
 let inflight = null;
@@ -526,11 +718,14 @@ async function refresh() {
       lastOverview = ov;
       setOffline(false);
       if (ov.label) {
-        $('#host-label').textContent = ov.label;
+        $('#ov-label').textContent = ov.label;
         document.title = `Причал · ${ov.label}`;
       }
       renderHost(ov.host);
       renderContainers(ov.containers);
+      renderOverview(ov);
+      if (imgState.data && !imgState.titled && imgState.mode !== 'busy') renderImages(imgState.data);
+      renderHostLine();
     } catch (e) {
       setOffline(true);
     } finally {
@@ -538,6 +733,13 @@ async function refresh() {
     }
   })();
   return inflight;
+}
+
+function renderHostLine() {
+  const hv = lastOverview?.host;
+  const os = upd.view?.system?.os;
+  const parts = [lastOverview?.label, os?.replace(/ LTS$/, ''), hv && `${hv.cpus} ${plural(hv.cpus, 'ядро', 'ядра', 'ядер')}`].filter(Boolean);
+  $('#host-line').textContent = parts.join(' · ');
 }
 
 function schedule() {
@@ -556,11 +758,12 @@ document.addEventListener('visibilitychange', () => {
 
 // ---------- Образы ----------
 
-let imgState = { mode: 'idle' };
+let imgState = { mode: 'idle', data: null };
 
 async function loadImages() {
   try {
     const data = await api('/api/images');
+    imgState.data = data;
     renderImages(data);
   } catch (e) {
     $('#im-sum').textContent = `Не удалось получить список: ${e.message}`;
@@ -571,39 +774,39 @@ function imgName(im) {
   return im.tags[0] || 'без имени';
 }
 
+function renderPrune(unused, buildCache) {
+  if (imgState.mode === 'busy') return;
+  const free = unused.reduce((s, i) => s + i.size, 0) + buildCache;
+  const what = [];
+  if (unused.length) what.push(`${unused.length} ${plural(unused.length, 'неиспользуемый образ', 'неиспользуемых образа', 'неиспользуемых образов')}`);
+  if (buildCache) what.push('кэш сборки');
+  const end = free
+    ? [h('span', { class: 'text', text: what.join(' и ') }), h('button', { class: 'pbtn white sm', onclick: () => askPrune(unused, buildCache) }, icon('broom'), `Очистить ${fmtBytes(free)}`)]
+    : h('span', { class: 'state plain', text: 'чистить нечего' });
+  $('#prune').replaceChildren(pillRow('Очистка', end));
+}
+
 function renderImages(data) {
   const { images, buildCache } = data;
   const total = images.reduce((s, i) => s + i.size, 0);
   const unused = images.filter(i => !i.usedBy.length);
-  const unusedSize = unused.reduce((s, i) => s + i.size, 0);
-  $('#im-sum').textContent = `${images.length} ${plural(images.length, 'образ', 'образа', 'образов')}, всего ${fmtBytes(total)}`;
+  imgState.titled = identities.size > 0; // иначе вместо названий будут имена в Docker
+  $('#im-sum').textContent = `${images.length} ${plural(images.length, 'образ', 'образа', 'образов')} · ${fmtBytes(total)}`;
+  $('#n-images').textContent = images.length || '';
+  renderPrune(unused, buildCache);
 
-  // Блок очистки
-  const prune = $('#prune');
-  if (imgState.mode !== 'busy') {
-    const free = unusedSize + buildCache;
-    const what = [];
-    if (unused.length) what.push(`${plural(unused.length, 'неиспользуемый образ', 'неиспользуемых образа', 'неиспользуемых образов')} (${unused.length})`);
-    if (buildCache) what.push('кэш сборки');
-    const text = free
-      ? `Можно освободить ${fmtBytes(free)}: ${what.join(' и ')}.`
-      : 'Всё, что лежит на диске, используется. Чистить нечего.';
-    const btn = h('button', { class: 'btn', disabled: !free, onclick: () => askPrune(unused, buildCache) }, icon('broom'), 'Очистить');
-    prune.replaceChildren(h('p', { text }), btn);
-  }
-
-  const ul = $('#im-list');
-  ul.replaceChildren(...images.map(im => {
+  $('#im-list').replaceChildren(...images.map(im => {
     const used = im.usedBy.length
       ? `нужен: ${im.usedBy.map(n => about({ name: n }).title).join(', ')}`
       : 'не используется';
-    const li = h('li', { class: 'im' },
-      h('div', {}, h('p', { class: 'im-name', title: im.tags.join(', ') || null, text: imgName(im) }),
-        h('p', { class: 'im-id', text: im.id.replace('sha256:', '').slice(0, 12) })),
-      h('div', { class: 'num', text: fmtBytes(im.size) }),
-      h('div', { class: 'muted', text: fmtAgo(Date.now() / 1000 - im.created) }),
-      h('div', { class: 'im-used' + (im.usedBy.length ? '' : ' is-free'), text: used }),
-      im.usedBy.length ? h('div') : h('button', { class: 'btn btn-quiet', onclick: () => askRemove(li, im) }, icon('trash'), 'Удалить'));
+    const li = h('li', { class: 'li', 'data-tone': im.usedBy.length ? 'ok' : 'idle' },
+      h('span', { class: 'sdot' }),
+      h('div', {}, h('p', { class: 'li-name', title: im.tags.join(', ') || null, text: imgName(im) }),
+        h('p', { class: 'li-sub', text: im.id.replace('sha256:', '').slice(0, 12) })),
+      h('p', { class: 'li-v num', text: fmtBytes(im.size) }),
+      h('p', { class: 'li-sub', text: fmtAgo(Date.now() / 1000 - im.created) }),
+      h('p', { class: 'im-used' + (im.usedBy.length ? '' : ' is-free'), text: used }),
+      im.usedBy.length ? h('span') : h('button', { class: 'textbtn', onclick: () => askRemove(li, im) }, icon('trash'), 'Удалить'));
     return li;
   }));
 }
@@ -611,21 +814,17 @@ function renderImages(data) {
 function askPrune(unused, buildCache) {
   const list = unused.map(i => `${imgName(i)} (${fmtBytes(i.size)})`);
   if (buildCache) list.push(`кэш сборки (${fmtBytes(buildCache)})`);
-  const prune = $('#prune');
-  const q = h('p', { class: 'confirm-q', tabindex: '-1', text: 'Очистить неиспользуемое?' });
-  const box = h('div', { class: 'confirm', onkeydown: e => { if (e.key === 'Escape') loadImages(); } },
-    q,
-    h('p', { class: 'confirm-text', text: `Будет удалено: ${list.join(', ')}. Образы, которые нужны контейнерам, останутся, даже если контейнер сейчас остановлен.` }),
-    h('div', { class: 'row' },
-      h('button', { class: 'btn btn-danger', onclick: doPrune }, icon('broom'), 'Да, очистить'),
-      h('button', { class: 'btn', onclick: loadImages }, 'Отмена')));
-  prune.replaceChildren(box);
-  q.focus();
+  const back = () => renderImages(imgState.data);
+  $('#prune').append(confirmBox({
+    q: 'Очистить неиспользуемое?',
+    text: `Будет удалено: ${list.join(', ')}. Образы, которые нужны контейнерам, останутся, даже если контейнер сейчас остановлен.`,
+    yes: 'Да, очистить', danger: true, onYes: doPrune, onNo: back,
+  }));
 }
 
 async function doPrune() {
   imgState.mode = 'busy';
-  $('#prune').replaceChildren(h('button', { class: 'btn is-busy', disabled: true }, icon('arrows-clockwise'), 'Очищаю…'));
+  $('#prune').replaceChildren(pillRow('Очистка', h('button', { class: 'pbtn white sm is-busy', disabled: true }, icon('arrows-clockwise'), 'Очищаю…')));
   try {
     const res = await api('/api/prune', { method: 'POST' });
     toast(`Готово, освобождено ${fmtBytes(res.reclaimed)}`);
@@ -638,15 +837,12 @@ async function doPrune() {
 
 function askRemove(li, im) {
   li.querySelector('.confirm')?.remove();
-  const q = h('p', { class: 'confirm-q', tabindex: '-1', text: `Удалить образ ${imgName(im)}?` });
-  const box = h('div', { class: 'confirm', onkeydown: e => { if (e.key === 'Escape') box.remove(); } },
-    q,
-    h('p', { class: 'confirm-text', text: 'Он не нужен ни одному контейнеру. Если понадобится снова, Docker скачает его заново.' }),
-    h('div', { class: 'row' },
-      h('button', { class: 'btn btn-danger', onclick: () => removeImage(im) }, icon('trash'), 'Да, удалить'),
-      h('button', { class: 'btn', onclick: () => box.remove() }, 'Отмена')));
+  const box = confirmBox({
+    q: `Удалить образ ${imgName(im)}?`,
+    text: 'Он не нужен ни одному контейнеру. Если понадобится снова, Docker скачает его заново.',
+    yes: 'Да, удалить', danger: true, onYes: () => removeImage(im), onNo: () => box.remove(),
+  });
   li.append(box);
-  q.focus();
 }
 
 async function removeImage(im) {
@@ -664,6 +860,7 @@ async function removeImage(im) {
 const CONN_MS = 10000;
 let conns = new Map(); // имя контейнера -> сервис
 let connTimer = null;
+let connSel = null; // какой сервис открыт в разделе
 
 function linkName(u) {
   if (u === 'amnezia') return 'Основная ссылка';
@@ -694,7 +891,7 @@ const CONN_NOTES = {
 };
 
 function bytesCell(iconName, value, title) {
-  return h('span', { class: 'cn-bytes', title }, iconName ? icon(iconName) : '', fmtBytes(value));
+  return h('span', { title }, iconName ? icon(iconName) : '', fmtBytes(value));
 }
 
 let editing = null; // пока открыта подпись, списки не перерисовываем, чтобы не сбить ввод
@@ -706,19 +903,19 @@ function connTitle(s, c) {
 
 function nameCell(s, c) {
   const t = connTitle(s, c);
-  const cell = h('div', { class: 'cn-name-cell' },
-    h('div', { class: 'cn-name-text' },
-      h('p', { class: 'cn-name', title: t.main, text: t.main }),
-      t.sub ? h('p', { class: 'cn-sub', text: t.sub }) : ''));
+  const cell = h('div', { class: 'cl-name-cell' },
+    h('div', { class: 'cl-name-text' },
+      h('p', { class: 'cl-name', title: t.main, text: t.main }),
+      t.sub ? h('p', { class: 'cl-sub', text: t.sub }) : ''));
   if (s.kind === 'telemt') {
-    cell.append(h('button', { class: 'cn-edit', title: 'Подписать', 'aria-label': `Подписать: ${t.main}`, onclick: () => editLabel(cell, s, c) }, icon('pencil-simple')));
+    cell.append(h('button', { class: 'cl-edit', title: 'Подписать', 'aria-label': `Подписать: ${t.main}`, onclick: () => editLabel(cell, s, c) }, icon('pencil-simple')));
   }
   return cell;
 }
 
 function editLabel(cell, s, c) {
   editing = { container: s.container, name: c.name };
-  const input = h('input', { class: 'cn-input', type: 'text', maxlength: '40', value: c.label || '', placeholder: 'Например, Мама', 'aria-label': `Подпись для «${linkName(c.name)}»` });
+  const input = h('input', { class: 'cl-input', type: 'text', maxlength: '40', value: c.label || '', placeholder: 'Например, Мама', 'aria-label': `Подпись для «${linkName(c.name)}»` });
   const cancel = () => { editing = null; renderAllConns(); };
   const save = async () => {
     try {
@@ -735,98 +932,90 @@ function editLabel(cell, s, c) {
     if (e.key === 'Enter') save();
     if (e.key === 'Escape') cancel();
   });
-  cell.closest('.cn-row')?.classList.add('is-editing');
-  cell.replaceChildren(h('div', { class: 'cn-edit-form' }, input,
-    h('button', { class: 'btn btn-primary', onclick: save }, 'Сохранить'),
-    h('button', { class: 'btn', onclick: cancel }, 'Отмена')));
+  cell.closest('.cl')?.classList.add('is-editing');
+  cell.replaceChildren(h('div', { class: 'cl-form' }, input,
+    h('button', { class: 'pbtn white sm', onclick: save }, 'Сохранить'),
+    h('button', { class: 'pbtn ghost sm', onclick: cancel }, 'Отмена')));
   input.focus();
   input.select();
 }
 
-function ipLine(label, ips) {
-  return h('p', { class: 'cn-ip-line' }, h('span', { text: label }), ips.map(ip => h('code', { class: 'cn-ip', text: ip })));
-}
-
-function connRow(s, c) {
+function connRow(s, c, big) {
   const now = Date.now() / 1000;
-  let st, seen = '', down = h('span'), up = h('span');
+  let tone, label, seen = '', traffic = [];
   if (s.kind === 'telemt') {
-    st = c.disabled ? { tone: 'idle', icon: 'stop-circle', label: 'Отключена' }
-      : c.online ? { tone: 'ok', icon: 'check-circle', label: 'На связи' }
-      : { tone: 'idle', icon: 'clock', label: 'Никого' };
+    [tone, label] = c.disabled ? ['idle', 'отключена'] : c.online ? ['ok', 'на связи'] : ['idle', 'никого'];
     if (c.online) seen = `${c.devices} ${plural(c.devices, 'устройство', 'устройства', 'устройств')} · ${c.conns} ${plural(c.conns, 'соединение', 'соединения', 'соединений')}`;
-    if (c.total) down = bytesCell(null, c.total, 'Трафик в обе стороны с запуска прокси');
-    else if (!c.online) seen = 'ещё не использовалась';
+    else if (!c.total) seen = 'ещё не использовалась';
+    else seen = label;
+    if (c.total) traffic = [bytesCell(null, c.total, 'Трафик в обе стороны с запуска прокси')];
   } else {
-    st = c.online ? { tone: 'ok', icon: 'check-circle', label: 'На связи' }
-      : (c.lastSeen || s.kind === 'openvpn') ? { tone: 'idle', icon: 'clock', label: 'Не на связи' }
-      : { tone: 'idle', icon: 'stop-circle', label: 'Не подключался' };
+    [tone, label] = c.online ? ['ok', 'на связи'] : (c.lastSeen || s.kind === 'openvpn') ? ['idle', 'не на связи'] : ['idle', 'не подключался'];
+    seen = label;
     if (s.kind === 'openvpn' && c.online && c.since) seen = `подключён с ${dateFmt.format(c.since * 1000)}`;
     else if (c.lastSeen && !c.online) seen = `был ${fmtAgo(now - c.lastSeen)}`;
     if (c.online || c.down || c.up) {
-      down = bytesCell('arrow-down', c.down, 'Скачал через VPN');
-      up = bytesCell('arrow-up', c.up, 'Отправил через VPN');
+      traffic = [bytesCell('arrow-down', c.down, 'Скачал через VPN'), bytesCell('arrow-up', c.up, 'Отправил через VPN')];
     }
   }
-  const li = h('li', { class: 'cn-row', 'data-tone': st.tone },
-    h('div', {}, h('span', { class: 'pill', 'data-tone': st.tone }, icon(st.icon), st.label)),
+  const li = h('li', { class: 'cl' + (big ? ' glass' : ''), 'data-tone': tone },
+    h('span', { class: 'sdot', title: label }),
     nameCell(s, c),
-    h('p', { class: 'cn-seen', text: seen }),
-    down, up);
+    h('p', { class: 'cl-seen', text: seen }),
+    h('span', { class: 'cl-tr num' }, traffic));
   const ips = c.ips || [], recent = c.recentIps || [];
   if (ips.length || recent.length) {
-    li.append(h('div', { class: 'cn-ips' },
-      ips.length ? ipLine('На связи:', ips) : '',
-      recent.length ? ipLine('Недавно:', recent) : ''));
+    li.append(h('div', { class: 'cl-ips' },
+      ips.length ? h('span', {}, 'на связи:', ips.map(ip => h('code', { text: ip }))) : '',
+      recent.length ? h('span', {}, 'недавно:', recent.map(ip => h('code', { text: ip }))) : ''));
   }
   return li;
 }
 
 // Тело одного сервиса: список клиентов или объяснение, почему его нет.
-function connBody(s) {
+function connBody(s, big) {
   if (s.state !== 'running') {
     return h('p', { class: 'cn-empty', text: s.state === 'paused' ? 'Контейнер на паузе, данных нет.' : 'Контейнер не работает, данных нет.' });
   }
   if (s.error) return h('p', { class: 'cn-empty', text: `Не удалось получить данные: ${s.error}` });
   if (!s.clients.length) return h('p', { class: 'cn-empty', text: 'Клиентов пока нет.' });
-  return h('ul', { class: 'cn-rows' }, s.clients.map(c => connRow(s, c)));
+  return h('ul', { class: 'cn-list' }, s.clients.map(c => connRow(s, c, big)));
 }
 
 function connCountText(s) {
   if (s.state !== 'running' || s.error) return '';
   const { online, total } = connCount(s);
   return total == null
-    ? [h('strong', { text: String(online) }), ` ${plural(online, 'устройство', 'устройства', 'устройств')} на связи`]
-    : [h('strong', { text: String(online) }), ` из ${total} на связи`];
+    ? `${online} ${plural(online, 'устройство', 'устройства', 'устройств')} на связи`
+    : `${online} из ${total} на связи`;
 }
 
 function connNote(s) {
-  return s.state === 'running' && !s.error && s.clients.length ? h('p', { class: 'cn-note', text: CONN_NOTES[s.kind] }) : '';
+  return s.state === 'running' && !s.error && s.clients.length ? h('p', { class: 'note', text: CONN_NOTES[s.kind] }) : '';
 }
 
 function renderConns() {
-  const list = $('#cn-list');
   const services = [...conns.values()];
+  const total = onlineTotal();
+  $('#n-conns').textContent = total || '';
   if (!services.length) {
-    $('#cn-sum').textContent = 'Сервисов Amnezia на сервере нет';
-    list.replaceChildren();
+    $('#cn-sum').textContent = 'сервисов Amnezia на сервере нет';
+    $('#cn-seg').replaceChildren();
+    $('#cn-list').replaceChildren();
     return;
   }
-  const parts = [];
-  for (const s of services) {
-    const { online } = connCount(s);
-    if (s.state === 'running' && !s.error && online) parts.push(`${about({ name: s.container }).title} ${online}`);
+  $('#cn-sum').textContent = total ? `на связи ${total} ${plural(total, 'устройство', 'устройства', 'устройств')}` : 'сейчас никого нет на связи';
+  if (!conns.has(connSel)) {
+    connSel = (services.find(s => s.state === 'running' && !s.error && connCount(s).online) || services[0]).container;
   }
-  list.replaceChildren(...services.map(s => {
-    const a = about({ name: s.container });
-    return h('section', { class: 'cn', 'aria-label': a.title },
-      h('header', { class: 'cn-head' },
-        h('h2', {}, a.title, a.sub ? h('small', { text: a.sub }) : ''),
-        h('p', { class: 'cn-count' }, connCountText(s))),
-      connBody(s),
-      connNote(s));
+  $('#cn-seg').replaceChildren(...services.map(s => {
+    const { online, total: t } = s.state === 'running' && !s.error ? connCount(s) : { online: null };
+    return h('button', { 'aria-pressed': String(s.container === connSel), onclick: () => { connSel = s.container; renderConns(); } },
+      about({ name: s.container }).title,
+      online == null ? '' : h('span', { class: 'n', text: t == null ? String(online) : `${online}/${t}` }));
   }));
-  $('#cn-sum').textContent = parts.length ? `на связи: ${parts.join(', ')}` : 'сейчас никого нет на связи';
+  const s = conns.get(connSel);
+  $('#cn-list').replaceChildren(connBody(s, true), connNote(s));
 }
 
 // Клиенты внутри раскрытой строки контейнера.
@@ -836,10 +1025,10 @@ function renderRowClients(r) {
   r.clients.hidden = !s;
   if (!s) return;
   r.clients.replaceChildren(
-    h('div', { class: 'ct-clients-head' },
-      h('h2', { text: s.kind === 'telemt' ? 'Ссылки и устройства' : 'Клиенты' }),
-      h('p', { class: 'cn-count' }, connCountText(s))),
-    h('div', { class: 'cn' }, connBody(s), connNote(s)));
+    h('div', { class: 'sub-h' },
+      h('h3', { text: s.kind === 'telemt' ? 'Ссылки и устройства' : 'Клиенты' }),
+      h('span', { class: 'faint', text: connCountText(s) })),
+    connBody(s, false), connNote(s));
 }
 
 function renderAllConns() {
@@ -854,10 +1043,11 @@ async function loadConns() {
     const data = await api('/api/connections');
     conns = new Map(data.services.map(s => [s.container, s]));
     const none = !data.services.length;
-    $('#tab-conns').hidden = none;
-    if (none && $('#tab-conns').getAttribute('aria-selected') === 'true') selectTab(0);
+    $('#nav-conns').hidden = none;
+    if (none && currentView === 'conns') go('overview');
     renderAllConns();
     for (const r of rows.values()) updateRow(r, r.c);
+    if (lastOverview) renderOverview(lastOverview);
   } catch (e) {
     $('#cn-sum').textContent = `Не удалось получить данные: ${e.message}`;
   }
@@ -874,7 +1064,7 @@ const GROUPS = [
 ];
 
 const upd = {
-  view: null, selected: new Set(), log: '', offset: 0, taskId: null, timer: null, confirm: null,
+  view: null, error: '', selected: new Set(), log: '', offset: 0, taskId: null, timer: null, confirm: null,
   openGroups: new Set(GROUPS.filter(g => g.open).map(g => g.key)),
   backup: new Map(), // приложение -> делать ли копию данных
 };
@@ -888,25 +1078,69 @@ async function loadUpdates(fresh = false) {
   try {
     const v = await api('/api/updates' + (fresh ? '?fresh=1' : ''));
     upd.view = v;
+    upd.error = '';
     const names = new Set((v.system?.packages || []).map(p => p.name));
     for (const n of [...upd.selected]) if (!names.has(n)) upd.selected.delete(n);
     renderUpdates();
     if (v.task) followTask(v.task);
   } catch (e) {
+    upd.error = e.message;
     $('#up-sum').textContent = `Не удалось получить данные: ${e.message}`;
+    renderUpdCard();
   }
+}
+
+function appUpdates(v) {
+  return (v?.apps?.apps || []).filter(a => a.update).length;
+}
+
+// Карточка в боковой панели: сколько всего можно обновить.
+function renderUpdCard() {
+  const v = upd.view;
+  const card = $('#upd-card');
+  if (!v) {
+    $('#upd-num').textContent = upd.error ? '—' : '…';
+    $('#upd-what').textContent = upd.error ? 'не удалось проверить' : 'проверяю';
+    return;
+  }
+  const sys = v.system;
+  const pk = sys?.supported ? sys.packages.length : 0;
+  const ap = appUpdates(v);
+  const total = pk + ap;
+  const running = taskRunning();
+  card.classList.toggle('is-due', total > 0 || !!sys?.rebootRequired);
+  $('#upd-num').textContent = running ? '…' : String(total);
+  $('#upd-what').replaceChildren(...(running ? ['идёт', h('br'), 'установка']
+    : pk ? [plural(pk, 'пакет', 'пакета', 'пакетов'), h('br'), 'системы']
+    : ap ? [plural(ap, 'приложение', 'приложения', 'приложений'), h('br'), 'обновить']
+    : ['всё', h('br'), 'обновлено']));
+  const note = [];
+  if (sys?.packages?.some(p => p.group === 'docker')) note.push(`Docker ${shortVer(sys.packages.find(p => p.name === 'docker-ce')?.to || '').replace(/-.*$/, '')}`.trim());
+  if (sys?.packages?.some(p => p.group === 'kernel')) note.push('ядро');
+  if (sys?.packages?.some(p => p.security)) note.push('безопасность');
+  let noteText = note.length ? `Среди них: ${note.join(', ')}.` : '';
+  if (sys?.rebootRequired) noteText += (noteText ? ' ' : '') + 'Серверу нужна перезагрузка.';
+  $('#upd-note').textContent = noteText;
+  $('#upd-apps').textContent = v.apps ? (ap ? `Приложений с новой версией: ${ap}` : 'Приложения актуальны') : '';
+  $('#n-updates').textContent = total || '';
+  renderHostLine();
 }
 
 function renderUpdates() {
   const v = upd.view;
   if (!v) return;
   const sys = v.system;
+  const pk = sys?.supported ? sys.packages.length : 0;
+  const ap = appUpdates(v);
+  $('#up-os').textContent = sys ? [sys.os, sys.kernel && `ядро ${sys.kernel.replace(/-generic$/, '')}`].filter(Boolean).join(' · ') : 'Система';
+  $('#up-title').textContent = pk ? `Можно обновить ${pk} ${plural(pk, 'пакет', 'пакета', 'пакетов')}`
+    : ap ? `Можно обновить ${ap} ${plural(ap, 'приложение', 'приложения', 'приложений')}`
+    : v.error ? 'Обновления' : 'Всё обновлено';
   const parts = [];
-  if (v.error) parts.push('пакеты: ошибка');
-  else if (sys && !sys.supported) parts.push(`пакеты: ${sys.pm} пока не поддерживается`);
-  else if (sys) parts.push(sys.packages.length ? `${sys.packages.length} ${plural(sys.packages.length, 'пакет', 'пакета', 'пакетов')} можно обновить` : 'пакеты свежие');
-  const appUpd = (v.apps?.apps || []).filter(a => a.update).length;
-  if (appUpd) parts.push(`${appUpd} ${plural(appUpd, 'приложение', 'приложения', 'приложений')} можно обновить`);
+  if (v.error) parts.push(`Пакеты: ${v.error}`);
+  else if (sys && !sys.supported) parts.push(`Пакетный менеджер ${sys.pm} пока не поддерживается`);
+  if (pk && ap) parts.push(`и ${ap} ${plural(ap, 'приложение', 'приложения', 'приложений')}`);
+  else if (v.apps && !ap) parts.push('Приложения на последних версиях');
   if (sys?.rebootRequired) parts.push('нужна перезагрузка');
   $('#up-sum').textContent = parts.join(' · ');
   renderReboot(sys);
@@ -914,20 +1148,7 @@ function renderUpdates() {
   renderApps(v);
   renderPkgs(v);
   renderFoot(sys);
-}
-
-// ----- Подтверждения (одно на странице) -----
-
-function confirmBox({ q, text, yes, danger, onYes, onNo }) {
-  const qEl = h('p', { class: 'confirm-q', tabindex: '-1', text: q });
-  const box = h('div', { class: 'confirm', 'data-tone': danger ? 'bad' : null, onkeydown: e => { if (e.key === 'Escape') onNo(); } },
-    qEl,
-    h('p', { class: 'confirm-text', text }),
-    h('div', { class: 'row' },
-      h('button', { class: 'btn ' + (danger ? 'btn-danger' : 'btn-primary'), onclick: onYes }, yes),
-      h('button', { class: 'btn', onclick: onNo }, 'Отмена')));
-  setTimeout(() => qEl.focus());
-  return box;
+  renderUpdCard();
 }
 
 function askUpd(kind) {
@@ -959,14 +1180,14 @@ function rebootConfirm() {
 function renderReboot(sys) {
   const box = $('#up-reboot');
   if (!sys?.rebootRequired) { box.replaceChildren(); return; }
-  const what = sys.rebootPkgs.length ? ` Обновились: ${sys.rebootPkgs.join(', ')}.` : '';
-  box.replaceChildren(h('div', { class: 'up-banner' },
-    h('span', { class: 'up-banner-ico' }, icon('arrows-clockwise')),
-    h('div', {},
-      h('p', { class: 'up-banner-title', text: 'Серверу нужна перезагрузка' }),
-      h('p', { class: 'up-banner-text', text: `${what} Новые версии заработают после перезагрузки. Сделайте её, когда будет удобно.` }),
-      upd.confirm === 'reboot-banner' ? rebootConfirm()
-        : h('button', { class: 'btn', disabled: taskRunning(), onclick: () => askUpd('reboot-banner') }, icon('arrows-clockwise'), 'Перезагрузить сейчас'))));
+  const what = sys.rebootPkgs.length ? `Обновились: ${sys.rebootPkgs.join(', ')}. ` : '';
+  box.replaceChildren(h('div', { class: 'banner glass' },
+    h('span', { class: 'sdot', 'data-tone': 'warn' }),
+    h('div', { class: 'text' },
+      h('b', { text: 'Серверу нужна перезагрузка' }),
+      h('span', { text: `${what}Новые версии заработают после неё. Сделайте её, когда будет удобно.` })),
+    upd.confirm === 'reboot-banner' ? '' : h('button', { class: 'pbtn white sm', disabled: taskRunning(), onclick: () => askUpd('reboot-banner') }, icon('power'), 'Перезагрузить')),
+  upd.confirm === 'reboot-banner' ? rebootConfirm() : '');
 }
 
 async function doReboot() {
@@ -983,17 +1204,19 @@ async function doReboot() {
 function renderFoot(sys) {
   const foot = $('#up-foot');
   if (sys?.rebootRequired) { foot.replaceChildren(); return; }
-  foot.replaceChildren(upd.confirm === 'reboot-foot' ? rebootConfirm()
-    : h('button', { class: 'btn btn-quiet', disabled: taskRunning(), onclick: () => askUpd('reboot-foot') }, icon('arrows-clockwise'), 'Перезагрузить сервер'));
+  foot.replaceChildren(
+    pillRow('Перезагрузка', [h('span', { class: 'text', text: 'не требуется' }),
+      upd.confirm === 'reboot-foot' ? '' : h('button', { class: 'pbtn ghost sm', disabled: taskRunning(), onclick: () => askUpd('reboot-foot') }, icon('power'), 'Перезагрузить сервер')]),
+    upd.confirm === 'reboot-foot' ? rebootConfirm() : '');
 }
 
 // ----- Задача и её журнал -----
 
 const TASK_STATE = {
-  running: { tone: 'warn', icon: 'arrows-clockwise', label: 'Идёт' },
-  done: { tone: 'ok', icon: 'check-circle', label: 'Готово' },
-  failed: { tone: 'bad', icon: 'warning-circle', label: 'Ошибка' },
-  interrupted: { tone: 'bad', icon: 'warning-circle', label: 'Прервано' },
+  running: { tone: 'warn', label: 'идёт' },
+  done: { tone: 'ok', label: 'готово' },
+  failed: { tone: 'bad', label: 'ошибка' },
+  interrupted: { tone: 'bad', label: 'прервано' },
 };
 
 function followTask(t) {
@@ -1023,10 +1246,11 @@ async function pollTask() {
   const wasRunning = taskRunning();
   if (upd.view) upd.view.task = t;
   renderTaskBox();
+  renderUpdCard();
   if (t.state === 'running') {
     upd.timer = setTimeout(pollTask, 2000);
   } else if (wasRunning) {
-    toast(t.state === 'done' ? `Готово: ${t.title}` : `${TASK_STATE[t.state].label}: ${t.title}`, t.state !== 'done');
+    toast(t.state === 'done' ? `Готово: ${t.title}` : `${cap(TASK_STATE[t.state].label)}: ${t.title}`, t.state !== 'done');
     loadUpdates();
   }
 }
@@ -1036,20 +1260,22 @@ function renderTaskBox() {
   const t = upd.view?.task;
   if (!t) { box.replaceChildren(); return; }
   const st = TASK_STATE[t.state] || TASK_STATE.running;
-  let when = `начато ${dateFmt.format(t.started * 1000)}`;
+  let when = `${st.label} · ${dateFmt.format(t.started * 1000)}`;
   if (t.finished) when += `, заняло ${fmtDur(t.finished - t.started)}`;
   if (t.state === 'failed' && t.exit != null) when += `, код ${t.exit}`;
   if (t.state === 'interrupted') when += ', сервер перезагрузился посреди задачи';
   let pre = box.querySelector('.logs');
   const keepBottom = !pre || pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-  const head = h('div', { class: 'up-task-head' },
-    h('span', { class: 'pill' + (t.state === 'running' ? ' is-busy' : ''), 'data-tone': st.tone }, icon(st.icon), st.label),
-    h('p', { class: 'up-task-title', text: t.title[0].toUpperCase() + t.title.slice(1) }),
-    h('p', { class: 'up-task-when', text: when }));
-  pre = h('pre', { class: 'logs up-log', tabindex: '0', 'aria-label': 'Ход выполнения' }, upd.log || 'Жду первых строк…');
+  const wasOpen = box.querySelector('details')?.open;
+  const head = [
+    h('span', { class: 'sdot', 'data-tone': st.tone }),
+    h('p', { class: 'task-title', text: cap(t.title) }),
+    h('p', { class: 'task-when', text: when }),
+  ];
+  pre = h('pre', { class: 'logs', tabindex: '0', 'aria-label': 'Ход выполнения' }, upd.log || 'Жду первых строк…');
   const wrap = t.state === 'running'
-    ? h('div', { class: 'up-task' }, head, pre)
-    : h('details', { class: 'up-task' }, h('summary', {}, head), pre);
+    ? h('div', { class: 'task glass is-busy' }, h('div', { class: 'task-head' }, head), pre)
+    : h('details', { class: 'task glass', open: wasOpen || null }, h('summary', { class: 'task-head' }, head, h('span', { class: 'ct-caret' }, icon('caret-down'))), pre);
   box.replaceChildren(wrap);
   if (keepBottom) pre.scrollTop = pre.scrollHeight;
 }
@@ -1085,49 +1311,54 @@ function appWhere(a) {
 
 function appRow(a) {
   const vers = a.current || '';
-  let status, action = '', note = '';
+  let status, action = '', note = '', tone = 'ok';
   if (a.error) {
-    status = h('p', { class: 'up-muted', text: a.error });
+    tone = 'bad';
+    status = h('p', { class: 'li-sub', text: a.error });
   } else if (a.git && a.git.behind > 0) {
+    tone = 'warn';
     const n = a.git.behind;
     status = h('div', {},
-      h('p', {}, 'В git ', h('strong', { text: `${n} ${plural(n, 'новый коммит', 'новых коммита', 'новых коммитов')}` }),
-        h('span', { class: 'up-muted', text: ` (${a.git.current} → ${a.git.latest})` })),
-      h('ul', { class: 'up-commits' }, a.git.commits.map(c => h('li', { text: c }))),
-      a.git.dirty ? h('p', { class: 'up-app-note', text: 'На сервере изменены файлы проекта: если они пересекаются с новыми, обновление остановится с ошибкой.' }) : '',
-      a.git.diverged ? h('p', { class: 'up-app-note', text: 'На сервере есть собственные коммиты: обновить отсюда нельзя, нужно слияние вручную.' }) : '');
-    action = h('div', { class: 'up-app-actions' },
-      h('button', { class: 'btn btn-primary', disabled: taskRunning() || a.git.diverged, onclick: () => askUpd('git:' + a.key) }, icon('arrow-down'), 'Обновить'));
+      h('p', {}, `В git ${n} ${plural(n, 'новый коммит', 'новых коммита', 'новых коммитов')}`, h('span', { class: 'faint', text: ` · ${a.git.current} → ${a.git.latest}` })),
+      h('ul', { class: 'commits' }, a.git.commits.map(c => h('li', { text: c }))),
+      a.git.dirty ? h('p', { class: 'app-note', text: 'На сервере изменены файлы проекта: если они пересекаются с новыми, обновление остановится с ошибкой.' }) : '',
+      a.git.diverged ? h('p', { class: 'app-note', text: 'На сервере есть собственные коммиты: обновить отсюда нельзя, нужно слияние вручную.' }) : '');
+    action = h('div', { class: 'app-actions' },
+      h('button', { class: 'pbtn white sm', disabled: taskRunning() || a.git.diverged, onclick: () => askUpd('git:' + a.key) }, icon('arrow-down'), 'Обновить'));
   } else if (a.git) {
-    status = h('p', { class: 'up-muted', text: `Установлена последняя версия из git (${a.git.current}).` });
+    status = h('p', { class: 'muted', text: `последняя версия из git (${a.git.current})` });
   } else if (a.gitError) {
-    status = h('p', { class: 'up-muted', text: `Образ собран на этом сервере. Проверить git не вышло: ${a.gitError}` });
+    tone = 'idle';
+    status = h('p', { class: 'li-sub', text: `Образ собран на этом сервере. Проверить git не вышло: ${a.gitError}` });
   } else if (a.local) {
-    status = h('p', { class: 'up-muted', text: 'Образ собран на этом сервере: сравнивать не с чем.' });
+    tone = 'idle';
+    status = h('p', { class: 'li-sub', text: 'Образ собран на этом сервере: сравнивать не с чем.' });
   } else if (a.update) {
-    status = h('p', {}, 'Вышла ', h('strong', { text: a.latest && a.latest !== a.current ? `версия ${a.latest}` : 'новая сборка' }),
-      a.built ? h('span', { class: 'up-muted', text: ` от ${dateFmt.format(Date.parse(a.built)).replace(/,.*$/, '')}` }) : '');
+    tone = 'warn';
+    status = h('p', {}, 'Вышла ', a.latest && a.latest !== a.current ? `версия ${a.latest}` : 'новая сборка',
+      a.built ? h('span', { class: 'faint', text: ` от ${dateFmt.format(Date.parse(a.built)).replace(/,.*$/, '')}` }) : '');
     const size = a.volumes.reduce((n, v) => n + Math.max(0, v.size), 0);
     const cb = h('input', { type: 'checkbox', id: `bk-${a.key}` });
     cb.checked = wantBackup(a);
     cb.disabled = taskRunning();
     cb.addEventListener('change', () => { upd.backup.set(a.key, cb.checked); });
-    action = h('div', { class: 'up-app-actions' },
-      a.volumes.length ? h('label', { class: 'toggle', for: `bk-${a.key}` }, cb, `копия данных${size ? ` (${fmtBytes(size)})` : ''}`) : '',
-      h('button', { class: 'btn btn-primary', disabled: taskRunning(), onclick: () => askUpd('app:' + a.key) }, icon('arrow-down'), 'Обновить'));
+    action = h('div', { class: 'app-actions' },
+      a.volumes.length ? h('label', { class: 'check', for: `bk-${a.key}` }, cb, `копия данных${size ? ` (${fmtBytes(size)})` : ''}`) : '',
+      h('button', { class: 'pbtn white sm', disabled: taskRunning(), onclick: () => askUpd('app:' + a.key) }, icon('arrow-down'), 'Обновить'));
   } else {
-    status = h('p', { class: 'up-muted', text: 'Установлена последняя версия.' });
+    status = h('p', { class: 'muted', text: 'последняя версия' });
   }
   if (a.pinned) {
     const tag = a.image.split('@')[0].split(':').pop();
-    note = h('p', { class: 'up-app-note', text: `Версия закреплена тегом «${tag}»: новые версии придут, только если поменять тег в docker-compose.` });
+    note = h('p', { class: 'app-note', text: `Версия закреплена тегом «${tag}»: новые версии придут, только если поменять тег в docker-compose.` });
   }
-  const li = h('li', { class: 'up-app' },
-    h('div', { class: 'up-app-name' },
-      h('p', { class: 'up-pkg-name', text: a.title }),
-      h('p', { class: 'up-muted', text: [appWhere(a), vers && `у вас ${vers}`].filter(Boolean).join(' · ') })),
-    h('div', { class: 'up-app-status' }, status, note),
-    action);
+  const li = h('li', { class: 'li app', 'data-tone': tone },
+    h('span', { class: 'sdot' }),
+    h('div', {},
+      h('p', { class: 'li-name', text: a.title }),
+      h('p', { class: 'li-sub', text: [appWhere(a), vers && `у вас ${vers}`].filter(Boolean).join(' · ') })),
+    h('div', {}, status, note),
+    action || h('span'));
   if (upd.confirm === 'git:' + a.key) {
     li.append(confirmBox({
       q: `Обновить ${a.title} из git?`,
@@ -1166,21 +1397,23 @@ function renderApps(v) {
   const manual = v.apps?.manual || [];
   card.hidden = !v.appsError && !apps.length && !manual.length;
   if (card.hidden) return;
-  const head = h('div', { class: 'up-card-head' },
-    h('h2', {}, 'Приложения', h('small', { text: 'docker compose' })),
-    v.apps ? h('p', { class: 'up-muted', text: `проверено ${fmtAgo(Date.now() / 1000 - v.apps.checkedAt)}` }) : '',
-    h('button', { class: 'btn btn-quiet', disabled: taskRunning(), onclick: () => loadUpdates(true) }, icon('arrows-clockwise'), 'Проверить'));
+  const head = h('div', { class: 'block-h' },
+    h('h2', { text: 'Приложения' }),
+    h('span', { class: 'faint', text: ['docker compose', v.apps && `проверено ${fmtAgo(Date.now() / 1000 - v.apps.checkedAt)}`].filter(Boolean).join(' · ') }),
+    h('button', { class: 'textbtn end', disabled: taskRunning(), onclick: () => loadUpdates(true) }, icon('arrows-clockwise'), 'Проверить'));
   const parts = [head];
   if (v.appsError) parts.push(h('p', { class: 'cn-empty', text: `Не удалось проверить: ${v.appsError}` }));
-  if (apps.length) parts.push(h('ul', { class: 'up-apps' }, apps.map(appRow)));
+  if (apps.length) parts.push(h('ul', {}, apps.map(appRow)));
   else if (!v.appsError) parts.push(h('p', { class: 'cn-empty', text: 'Приложений на docker compose нет.' }));
   if (manual.length) {
-    parts.push(h('details', { class: 'up-group' },
+    parts.push(h('details', { class: 'grp' },
       h('summary', {},
-        h('span', { class: 'up-group-title', text: `Обновляются не отсюда: ${manual.length}` }),
+        h('span', { class: 'grp-title', text: `Обновляются не отсюда: ${manual.length}` }),
         h('span', { class: 'ct-caret' }, icon('caret-down'))),
-      h('ul', { class: 'up-list up-manual' }, manual.map(m => h('li', {},
-        h('span', { class: 'up-pkg-name', text: m.title }), h('span', { class: 'up-muted', text: ` ${m.name !== m.title ? m.name + ', ' : ''}${m.reason}` }))))));
+      h('ul', {}, manual.map(m => h('li', { class: 'li', 'data-tone': 'idle' },
+        h('span', { class: 'sdot' }),
+        h('div', {}, h('p', { class: 'li-name', text: m.title }), h('p', { class: 'li-sub', text: `${m.name !== m.title ? m.name + ', ' : ''}${m.reason}` })),
+        h('span'))))));
   }
   card.replaceChildren(...parts);
 }
@@ -1189,7 +1422,7 @@ function renderApps(v) {
 
 function groupCheckbox(pkgs) {
   const n = pkgs.filter(p => upd.selected.has(p.name)).length;
-  const cb = h('input', { type: 'checkbox', 'aria-label': 'Выбрать всю группу' });
+  const cb = h('input', { type: 'checkbox', class: 'rc', 'aria-label': 'Выбрать всю группу' });
   cb.checked = n > 0 && n === pkgs.length;
   cb.indeterminate = n > 0 && n < pkgs.length;
   cb.disabled = taskRunning();
@@ -1203,8 +1436,12 @@ function groupCheckbox(pkgs) {
   return cb;
 }
 
+// «5:29.8.1-1~ubuntu.24.04~noble» -> «29.8.1-1»: эпоха и хвост дистрибутива
+// только мешают читать. Полная версия остаётся в подсказке.
+const shortVer = v => v.replace(/^\d+:/, '').replace(/[~+].*$/, '');
+
 function pkgRow(p) {
-  const cb = h('input', { type: 'checkbox', id: `pkg-${p.name}` });
+  const cb = h('input', { type: 'checkbox', class: 'rc', id: `pkg-${p.name}` });
   cb.checked = upd.selected.has(p.name);
   cb.disabled = taskRunning();
   cb.addEventListener('change', () => {
@@ -1212,14 +1449,12 @@ function pkgRow(p) {
     upd.confirm = null;
     renderUpdates();
   });
-  return h('li', { class: 'up-pkg' },
+  return h('li', { class: 'li' },
     cb,
-    h('label', { for: `pkg-${p.name}`, class: 'up-pkg-main' },
-      h('span', { class: 'up-pkg-name', text: p.name }),
-      p.security && p.group !== 'security' ? h('span', { class: 'up-tag', text: 'безопасность' }) : '',
-      h('span', { class: 'up-pkg-sum', text: p.summary || '' })),
-    h('span', { class: 'up-ver', title: `${p.from} → ${p.to}` },
-      h('span', { class: 'up-ver-from', text: p.from }), icon('arrow-right'), h('span', { text: p.to })));
+    h('label', { for: `pkg-${p.name}` },
+      h('span', { class: 'li-name' }, p.name, p.security && p.group !== 'security' ? h('span', { class: 'tagline', text: 'безопасность' }) : ''),
+      h('span', { class: 'li-sub', text: p.summary || '' })),
+    h('span', { class: 'li-v', title: `${p.from} → ${p.to}` }, h('span', { text: shortVer(p.from) }), icon('arrow-right'), h('b', { text: shortVer(p.to) })));
 }
 
 function selectOnly(pred) {
@@ -1232,10 +1467,10 @@ function renderPkgs(v) {
   const card = $('#up-pkgs');
   const sys = v.system;
   const checked = sys?.listsAt ? `списки обновлены ${fmtAgo(Date.now() / 1000 - sys.listsAt)}` : '';
-  const head = h('div', { class: 'up-card-head' },
-    h('h2', {}, 'Пакеты системы', sys?.os ? h('small', { text: sys.os }) : ''),
-    h('p', { class: 'up-muted', text: checked }),
-    sys?.supported ? h('button', { class: 'btn btn-quiet', disabled: taskRunning(), onclick: () => startTask('/api/updates/check') }, icon('arrows-clockwise'), 'Проверить обновления') : '');
+  const head = h('div', { class: 'block-h' },
+    h('h2', { text: 'Пакеты системы' }),
+    h('span', { class: 'faint', text: [sys?.pm, checked].filter(Boolean).join(' · ') }),
+    sys?.supported ? h('button', { class: 'textbtn end', disabled: taskRunning(), onclick: () => startTask('/api/updates/check') }, icon('arrows-clockwise'), 'Проверить обновления') : '');
   if (v.error) {
     card.replaceChildren(head, h('p', { class: 'cn-empty', text: `Не удалось получить список: ${v.error}` }));
     return;
@@ -1244,86 +1479,83 @@ function renderPkgs(v) {
     card.replaceChildren(head, h('p', { class: 'cn-empty', text: `Пакетный менеджер «${sys.pm}» пока не поддерживается. Причал умеет apt (Debian, Ubuntu), dnf и yum (Fedora, RHEL, Rocky, Alma) и apk (Alpine).` }));
     return;
   }
-  v = sys;
-  if (!v.packages.length) {
+  if (!sys.packages.length) {
     card.replaceChildren(head, h('p', { class: 'cn-empty', text: 'Все пакеты обновлены.' }));
     return;
   }
-  const quick = h('div', { class: 'up-quick' },
-    h('span', { class: 'up-muted', text: 'Выбрать:' }),
-    h('button', { class: 'btn btn-quiet', disabled: taskRunning(), onclick: () => selectOnly(p => p.security) }, 'только безопасность'),
-    h('button', { class: 'btn btn-quiet', disabled: taskRunning(), onclick: () => selectOnly(p => p.group !== 'docker') }, 'всё, кроме Docker'),
-    h('button', { class: 'btn btn-quiet', disabled: taskRunning(), onclick: () => selectOnly(() => true) }, 'всё'),
-    upd.selected.size ? h('button', { class: 'btn btn-quiet', disabled: taskRunning(), onclick: () => selectOnly(() => false) }, 'снять выбор') : '');
+  const quick = h('div', { class: 'quick' },
+    h('span', { class: 'faint', text: 'Выбрать:' }),
+    h('button', { class: 'textbtn', disabled: taskRunning(), onclick: () => selectOnly(p => p.security) }, 'только безопасность'),
+    h('button', { class: 'textbtn', disabled: taskRunning(), onclick: () => selectOnly(p => p.group !== 'docker') }, 'всё, кроме Docker'),
+    h('button', { class: 'textbtn', disabled: taskRunning(), onclick: () => selectOnly(() => true) }, 'всё'),
+    upd.selected.size ? h('button', { class: 'textbtn', disabled: taskRunning(), onclick: () => selectOnly(() => false) }, 'снять выбор') : '');
   const groups = GROUPS.map(g => {
-    const pkgs = v.packages.filter(p => p.group === g.key);
+    const pkgs = sys.packages.filter(p => p.group === g.key);
     if (!pkgs.length) return '';
     const n = pkgs.filter(p => upd.selected.has(p.name)).length;
-    const det = h('details', { class: 'up-group', open: upd.openGroups.has(g.key) },
+    const det = h('details', { class: 'grp', open: upd.openGroups.has(g.key) },
       h('summary', {},
         groupCheckbox(pkgs),
-        h('span', { class: 'up-group-title', text: g.title }),
-        h('span', { class: 'up-muted', text: n ? `выбрано ${n} из ${pkgs.length}` : `${pkgs.length}` }),
+        h('span', { class: 'grp-title', text: g.title }),
+        h('span', { class: 'faint', text: n ? `выбрано ${n} из ${pkgs.length}` : `${pkgs.length}` }),
         h('span', { class: 'ct-caret' }, icon('caret-down'))),
-      g.note ? h('p', { class: 'up-group-note', text: g.note }) : '',
-      h('ul', { class: 'up-list' }, pkgs.map(pkgRow)));
+      g.note ? h('p', { class: 'grp-note', text: g.note }) : '',
+      h('ul', {}, pkgs.map(pkgRow)));
     det.addEventListener('toggle', () => { det.open ? upd.openGroups.add(g.key) : upd.openGroups.delete(g.key); });
     return det;
   });
-  const sel = v.packages.filter(p => upd.selected.has(p.name));
+  const sel = sys.packages.filter(p => upd.selected.has(p.name));
   let bar;
   if (upd.confirm === 'install' && sel.length) {
     const notes = [];
     if (sel.some(p => p.group === 'docker')) {
       notes.push('Docker перезапустится: все контейнеры и эта панель пропадут примерно на полминуты.');
-      if (v.init !== 'systemd') notes.push('На этом сервере нет systemd, поэтому обновление Docker может оборвать саму установку. Надёжнее обновить Docker из терминала.');
+      if (sys.init !== 'systemd') notes.push('На этом сервере нет systemd, поэтому обновление Docker может оборвать саму установку. Надёжнее обновить Docker из терминала.');
     }
     if (sel.some(p => p.group === 'kernel')) notes.push('Новое ядро заработает после перезагрузки сервера.');
     notes.push('Установка займёт несколько минут, её ход будет виден вверху страницы.');
-    bar = confirmBox({
+    bar = h('div', { class: 'bar' }, confirmBox({
       q: `Установить ${sel.length} ${plural(sel.length, 'пакет', 'пакета', 'пакетов')}?`,
       text: notes.join(' '), yes: 'Да, установить',
       onYes: () => startTask('/api/updates/install', { packages: sel.map(p => p.name) }), onNo: cancelUpd,
-    });
+    }));
   } else {
-    bar = h('div', { class: 'up-bar' },
-      h('p', { class: 'up-muted', text: sel.length ? `Выбрано: ${sel.length}` : 'Отметьте, что установить' }),
-      h('button', { class: 'btn btn-primary', disabled: !sel.length || taskRunning(), onclick: () => askUpd('install') }, icon('arrow-down'), 'Установить выбранное'));
+    bar = h('div', { class: 'bar' },
+      h('p', { class: 'faint', text: sel.length ? `выбрано ${sel.length} из ${sys.packages.length}` : 'отметьте, что установить' }),
+      h('button', { class: 'pbtn white', disabled: !sel.length || taskRunning(), onclick: () => askUpd('install') }, 'Установить', icon('arrow-right')));
   }
   card.replaceChildren(head, quick, ...groups, bar);
 }
 
-// ---------- Вкладки ----------
+// ---------- Разделы ----------
 
-const tabs = [$('#tab-containers'), $('#tab-conns'), $('#tab-updates'), $('#tab-images')];
-const views = [$('#view-containers'), $('#view-conns'), $('#view-updates'), $('#view-images')];
-const hashes = ['#', '#connections', '#updates', '#images'];
+const VIEWS = { overview: '#', containers: '#containers', conns: '#connections', updates: '#updates', images: '#images' };
+let currentView = 'overview';
 
-function selectTab(i, focus = false) {
-  tabs.forEach((t, j) => {
-    t.setAttribute('aria-selected', String(i === j));
-    t.tabIndex = i === j ? 0 : -1;
-    views[j].hidden = i !== j;
-  });
-  if (focus) tabs[i].focus();
-  history.replaceState(null, '', hashes[i]);
-  if (i === 1) loadConns();
-  if (i === 2) loadUpdates();
-  if (i === 3) loadImages();
+function go(view) {
+  if (!VIEWS[view]) view = 'overview';
+  currentView = view;
+  for (const v of Object.keys(VIEWS)) document.getElementById(`view-${v}`).hidden = v !== view;
+  document.querySelectorAll('.nav button').forEach(b => b.dataset.view === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
+  history.replaceState(null, '', VIEWS[view] === '#' ? location.pathname : VIEWS[view]);
+  window.scrollTo(0, 0);
+  if (view === 'conns') loadConns();
+  if (view === 'updates') loadUpdates();
+  if (view === 'images') loadImages();
 }
 
-tabs.forEach((t, i) => {
-  t.addEventListener('click', () => selectTab(i));
-  t.addEventListener('keydown', e => {
-    const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
-    if (d) selectTab((i + d + tabs.length) % tabs.length, true);
-  });
-});
+document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
 
 // ---------- Старт ----------
 
 document.querySelectorAll('[data-icon]').forEach(el => el.replaceChildren(icon(el.dataset.icon)));
-selectTab(Math.max(0, hashes.indexOf(location.hash)));
+renderTrack('m-mem');
+renderTrack('m-disk');
+renderTrack('m-cpu');
+const viewFromHash = () => Object.keys(VIEWS).find(v => VIEWS[v] === location.hash) || 'overview';
+const startView = viewFromHash();
+go(startView);
+window.addEventListener('hashchange', () => go(viewFromHash()));
 api('/api/session').then(s => {
   if (!s.auth) return;
   const btn = $('#logout');
@@ -1334,4 +1566,6 @@ api('/api/session').then(s => {
   });
 }).catch(() => {});
 refresh().then(schedule);
-if (hashes.indexOf(location.hash) !== 1) loadConns();
+if (startView !== 'conns') loadConns();
+if (startView !== 'updates') loadUpdates();
+if (startView !== 'images') loadImages();

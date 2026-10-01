@@ -24,13 +24,15 @@ import (
 var webFS embed.FS
 
 type server struct {
-	docker *Docker
-	col    *Collector
-	conns  *ConnWatcher
-	upd    *Updates
-	auth   *Auth
-	hosts  map[string]bool // extra hostnames allowed besides localhost
-	locked string          // non-empty: reachable from outside without a password; why
+	docker  *Docker
+	col     *Collector
+	conns   *ConnWatcher
+	upd     *Updates
+	auth    *Auth
+	journal *Journal
+	tgUser  string          // Telegram user the alerts go to; empty: alerts are off
+	hosts   map[string]bool // extra hostnames allowed besides localhost
+	locked  string          // non-empty: reachable from outside without a password; why
 }
 
 func env(k, def string) string {
@@ -71,14 +73,17 @@ func main() {
 	}
 
 	apps := NewApps(d, selfID)
+	journal := LoadJournal(dataDir)
 	s := &server{
-		docker: d,
-		col:    NewCollector(d, selfID, hostRoot, hostLabel(hostRoot)),
-		conns:  &ConnWatcher{docker: d, labels: LoadLabels(dataDir)},
-		upd:    NewUpdates(d, apps, hostRoot, dataDir),
-		auth:   NewAuth(os.Getenv("PRICHAL_PASSWORD")),
-		hosts:  map[string]bool{},
+		docker:  d,
+		col:     NewCollector(d, selfID, hostRoot, hostLabel(hostRoot)),
+		conns:   &ConnWatcher{docker: d, labels: LoadLabels(dataDir)},
+		upd:     NewUpdates(d, apps, hostRoot, dataDir),
+		auth:    NewAuth(os.Getenv("PRICHAL_PASSWORD")),
+		journal: journal,
+		hosts:   map[string]bool{},
 	}
+	s.upd.journal = journal
 	for _, h := range strings.Split(os.Getenv("ALLOWED_HOSTS"), ",") {
 		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
 			s.hosts[h] = true
@@ -96,11 +101,13 @@ func main() {
 		log.Printf("ВНИМАНИЕ: работа заблокирована: %s. Задайте PRICHAL_PASSWORD в .env", s.locked)
 	}
 
-	if tg := NewTelegram(os.Getenv("TG_TOKEN"), os.Getenv("TG_USERNAME"), dataDir); tg != nil {
-		go NewNotifier(d, tg, hostRoot, s.upd).Run(context.Background())
+	tg := NewTelegram(os.Getenv("TG_TOKEN"), os.Getenv("TG_USERNAME"), dataDir)
+	if tg != nil {
+		s.tgUser = tg.username
 	} else {
 		log.Printf("Telegram не настроен (нет TG_TOKEN/TG_USERNAME), уведомления выключены")
 	}
+	go NewNotifier(d, tg, hostRoot, s.upd, s.journal).Run(context.Background())
 
 	static, _ := fs.Sub(webFS, "web")
 	mux := http.NewServeMux()
@@ -250,7 +257,17 @@ func (s *server) overview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, ov)
+	writeJSON(w, http.StatusOK, struct {
+		*Overview
+		Events   []Event `json:"events"`
+		Telegram string  `json:"telegram"` // who gets the alerts; empty: alerts are off
+	}{ov, s.journal.List(), s.tgUser})
+}
+
+// actionDone is how the timeline says what the panel did to a container.
+var actionDone = map[string]string{
+	"start": "запущен", "stop": "остановлен", "restart": "перезапущен",
+	"kill": "остановлен принудительно", "pause": "поставлен на паузу", "unpause": "снят с паузы",
 }
 
 // findContainer accepts only IDs of containers that exist right now.
@@ -292,7 +309,9 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("%s: %s", c.Name(), act)
+	title := identify(c.Name(), c.Image, c.Labels["com.docker.compose.service"], self).Title
 	if self {
+		s.journal.Add("", title+" "+actionDone[act]+" из панели")
 		// Answer first: the restart will cut this very connection.
 		writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 		go func() {
@@ -309,6 +328,7 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.col.Remember(id, act)
+	s.journal.Add("", title+" "+actionDone[act]+" из панели")
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "1"})
 }
 

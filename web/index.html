@@ -3,89 +3,157 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Причал</title>
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="app.css">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 </head>
 <body>
-<div class="page">
 
-  <header class="top">
-    <div class="brand">
-      <span class="brand-mark" data-icon="anchor-simple" aria-hidden="true"></span>
-      <div>
-        <p class="brand-name">Причал</p>
-        <p class="brand-host" id="host-label">Контейнеры на сервере</p>
-      </div>
+<div class="bg" aria-hidden="true">
+  <svg class="rock rock-l" viewBox="0 0 1100 900">
+    <defs>
+      <filter id="stone" x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.011 0.016" numOctaves="7" seed="11"/>
+        <feDiffuseLighting lighting-color="#cfcfcf" surfaceScale="7"><feDistantLight azimuth="230" elevation="38"/></feDiffuseLighting>
+        <feColorMatrix type="matrix" values=".26 .26 .26 0 -0.36  .26 .26 .26 0 -0.36  .26 .26 .26 0 -0.36  0 0 0 1 0"/>
+      </filter>
+      <linearGradient id="fade" x1="0" y1="0" x2="1" y2="1"><stop offset=".25" stop-color="#fff"/><stop offset=".85" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <mask id="ridge"><path fill="url(#fade)" d="M0,900 L0,300 C80,240 130,120 230,90 C300,70 330,170 400,190 C470,210 520,150 590,200 C680,260 700,380 790,430 C880,480 960,560 1100,640 L1100,900 Z"/></mask>
+    </defs>
+    <rect width="1100" height="900" filter="url(#stone)" mask="url(#ridge)"/>
+  </svg>
+  <svg class="rock rock-r" viewBox="0 0 1100 900"><rect width="1100" height="900" filter="url(#stone)" mask="url(#ridge)"/></svg>
+</div>
+
+<div class="app">
+  <aside class="side">
+    <p class="brand"><span data-icon="anchor-simple" aria-hidden="true"></span>Причал</p>
+    <nav class="nav" aria-label="Разделы">
+      <button data-view="overview">Обзор</button>
+      <button data-view="containers">Контейнеры <span class="n" id="n-containers"></span></button>
+      <button data-view="conns" id="nav-conns">Подключения <span class="n" id="n-conns"></span></button>
+      <button data-view="updates">Обновления <span class="n" id="n-updates"></span></button>
+      <button data-view="images">Образы <span class="n" id="n-images"></span></button>
+    </nav>
+
+    <section class="upd glass" id="upd-card" aria-label="Обновления">
+      <span class="chip glass">Обновления</span>
+      <div class="upd-big"><b class="num" id="upd-num">…</b><span id="upd-what">проверяю</span></div>
+      <p id="upd-note"></p>
+      <p class="upd-apps" id="upd-apps"></p>
+      <button class="pbtn ghost sm" data-view="updates">Открыть <span data-icon="arrow-right" aria-hidden="true"></span></button>
+    </section>
+    <div class="side-foot">
+      <p class="host" id="host-line"></p>
+      <button class="textbtn" id="logout" hidden><span data-icon="sign-out" aria-hidden="true"></span>Выйти</button>
     </div>
-    <div class="top-actions">
-      <nav class="tabs" role="tablist" aria-label="Разделы">
-        <button class="tab" role="tab" id="tab-containers" aria-selected="true" aria-controls="view-containers">Контейнеры</button>
-        <button class="tab" role="tab" id="tab-conns" aria-selected="false" aria-controls="view-conns">Подключения</button>
-        <button class="tab" role="tab" id="tab-updates" aria-selected="false" aria-controls="view-updates">Обновления</button>
-        <button class="tab" role="tab" id="tab-images" aria-selected="false" aria-controls="view-images">Образы</button>
-      </nav>
-      <button class="btn btn-quiet" id="logout" hidden>Выйти</button>
+  </aside>
+
+  <main class="main">
+    <div class="offline glass" id="offline" hidden role="alert">
+      <span data-icon="wifi-slash" aria-hidden="true"></span>
+      <p><strong>Нет связи с панелью.</strong> Похоже, окно «Сервер» закрыто. Запустите его снова, страница обновится сама.</p>
     </div>
-  </header>
 
-  <div class="offline" id="offline" hidden role="alert">
-    <span data-icon="wifi-slash" aria-hidden="true"></span>
-    <p><strong>Нет связи с панелью.</strong> Похоже, окно «Сервер» закрыто. Запустите его снова, страница обновится сама.</p>
-  </div>
+    <!-- ============ Обзор ============ -->
+    <section class="view" id="view-overview" aria-labelledby="ov-title">
+      <div class="ov">
+        <div>
+          <div class="hero">
+            <div class="chip-row">
+              <span class="chip glass" id="ov-label">Сервер</span>
+              <span class="chip glass" id="ov-live"><span class="live"></span>на связи</span>
+            </div>
+            <h1 id="ov-title">Загружаю…</h1>
+            <p class="sub" id="ov-sub"></p>
+          </div>
 
-  <section class="host" id="host" hidden aria-label="Состояние сервера">
-    <div class="meter" id="m-cpu"><p class="meter-label">Процессор</p><p class="meter-value"></p><div class="meter-bar"><i></i></div><p class="meter-sub"></p></div>
-    <div class="meter" id="m-mem"><p class="meter-label">Память</p><p class="meter-value"></p><div class="meter-bar"><i></i></div><p class="meter-sub"></p></div>
-    <div class="meter" id="m-disk"><p class="meter-label">Диск</p><p class="meter-value"></p><div class="meter-bar"><i></i></div><p class="meter-sub"></p></div>
-    <div class="meter meter-plain" id="m-up"><p class="meter-label">Сервер работает</p><p class="meter-value"></p><p class="meter-sub"></p></div>
-  </section>
+          <div class="meters">
+            <div>
+              <div class="meter glass" id="m-cpu"><span class="fill"></span><span class="m-label">Процессор</span><span class="m-track"></span><span class="m-val num"></span></div>
+              <p class="cap" id="m-cpu-cap"></p>
+            </div>
+            <div>
+              <div class="meter glass" id="m-mem"><span class="fill"></span><span class="m-label">Память</span><span class="m-track"></span><span class="m-val num"></span></div>
+              <p class="cap" id="m-mem-cap"></p>
+            </div>
+            <div>
+              <div class="meter glass" id="m-disk"><span class="fill"></span><span class="m-label">Диск</span><span class="m-track"></span><span class="m-val num"></span></div>
+              <p class="cap" id="m-disk-cap"></p>
+            </div>
+          </div>
 
-  <main>
-    <section id="view-containers" role="tabpanel" aria-labelledby="tab-containers">
-      <div class="section-head">
-        <h1>Контейнеры</h1>
-        <p class="section-sum" id="ct-sum">Загружаю…</p>
+          <div class="sec"><h2>Контейнеры</h2><button class="textbtn" data-view="containers">все контейнеры <span data-icon="arrow-right" aria-hidden="true"></span></button></div>
+          <div class="tiles" id="tiles"></div>
+
+          <div class="sec"><h2>Уведомления</h2></div>
+          <div id="tg-row"></div>
+          <div class="tags" id="tg-tags"></div>
+        </div>
+
+        <aside class="rail" aria-label="Что происходило">
+          <p class="rail-title">сейчас</p>
+          <div id="events"></div>
+        </aside>
       </div>
-      <div class="ct-cols" aria-hidden="true">
-        <span>Состояние</span><span>Контейнер</span><span>Процессор</span><span>Память</span><span>Как долго</span>
-      </div>
-      <ul class="ct-list" id="ct-list"></ul>
     </section>
 
-    <section id="view-conns" role="tabpanel" aria-labelledby="tab-conns" hidden>
-      <div class="section-head">
-        <h1>Подключения</h1>
-        <p class="section-sum" id="cn-sum">Загружаю…</p>
+    <!-- ============ Контейнеры ============ -->
+    <section class="view" id="view-containers" aria-labelledby="ct-title" hidden>
+      <div class="hero">
+        <div class="chip-row"><span class="chip glass" id="ct-chip"><span class="live"></span><span id="ct-sum">Загружаю…</span></span></div>
+        <h1 id="ct-title">Контейнеры</h1>
+        <p class="sub">Нажмите на строку — откроются подробности, управление и журнал.</p>
       </div>
-      <div class="cn-list" id="cn-list"></div>
+      <div class="seg glass" role="group" aria-label="Какие показать" id="ct-filter">
+        <button aria-pressed="true" data-filter="all">Все <span class="n" id="f-all"></span></button>
+        <button aria-pressed="false" data-filter="net">VPN и прокси <span class="n" id="f-net"></span></button>
+        <button aria-pressed="false" data-filter="apps">Приложения <span class="n" id="f-apps"></span></button>
+      </div>
+      <ul class="list" id="ct-list"></ul>
     </section>
 
-    <section id="view-updates" role="tabpanel" aria-labelledby="tab-updates" hidden>
-      <div class="section-head">
-        <h1>Обновления</h1>
-        <p class="section-sum" id="up-sum">Загружаю…</p>
+    <!-- ============ Подключения ============ -->
+    <section class="view" id="view-conns" aria-labelledby="cn-title" hidden>
+      <div class="hero">
+        <div class="chip-row"><span class="chip glass"><span class="live"></span><span id="cn-sum">Загружаю…</span></span></div>
+        <h1 id="cn-title">Подключения</h1>
+        <p class="sub">Кто сейчас пользуется VPN и прокси на этом сервере.</p>
+      </div>
+      <div class="seg glass" role="group" aria-label="Сервис" id="cn-seg"></div>
+      <div id="cn-list"></div>
+    </section>
+
+    <!-- ============ Обновления ============ -->
+    <section class="view" id="view-updates" aria-labelledby="up-title" hidden>
+      <div class="hero">
+        <div class="chip-row"><span class="chip glass" id="up-os">Система</span></div>
+        <h1 id="up-title">Обновления</h1>
+        <p class="sub" id="up-sum">Загружаю…</p>
       </div>
       <div id="up-reboot"></div>
       <div id="up-task"></div>
-      <section class="up-card" id="up-apps" hidden></section>
-      <section class="up-card" id="up-pkgs"></section>
-      <div class="up-foot" id="up-foot"></div>
+      <section class="block glass" id="up-pkgs"></section>
+      <section class="block glass" id="up-apps" hidden></section>
+      <div id="up-foot"></div>
     </section>
 
-    <section id="view-images" role="tabpanel" aria-labelledby="tab-images" hidden>
-      <div class="section-head">
-        <h1>Образы</h1>
-        <p class="section-sum" id="im-sum">Загружаю…</p>
+    <!-- ============ Образы ============ -->
+    <section class="view" id="view-images" aria-labelledby="im-title" hidden>
+      <div class="hero">
+        <div class="chip-row"><span class="chip glass" id="im-sum">Загружаю…</span></div>
+        <h1 id="im-title">Образы</h1>
+        <p class="sub">Из образов Docker запускает контейнеры. Ненужные можно удалить и освободить место.</p>
       </div>
-      <div class="prune" id="prune"></div>
-      <ul class="im-list" id="im-list"></ul>
+      <div id="prune"></div>
+      <ul class="block glass im-list" id="im-list"></ul>
     </section>
   </main>
-
-  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 </div>
+
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 <script type="module" src="app.js"></script>
 </body>
 </html>
