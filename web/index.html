@@ -41,7 +41,7 @@
     <button class="pbtn ghost sm reboot" id="reboot-btn"><span data-icon="power" aria-hidden="true"></span><span>Перезагрузить сервер</span></button>
     <div class="side-foot">
       <p class="host" id="host-line"></p>
-      <button class="textbtn" id="logout" hidden><span data-icon="sign-out" aria-hidden="true"></span>Выйти</button>
+      <button class="textbtn js-logout" id="logout" hidden><span data-icon="sign-out" aria-hidden="true"></span>Выйти</button>
     </div>
   </aside>
 
@@ -127,10 +127,21 @@
         <h1 id="up-title">Обновления</h1>
         <p class="sub" id="up-sum">Загружаю…</p>
         <div class="hero-actions"><button class="pbtn ghost" id="up-check"><span data-icon="arrows-clockwise" aria-hidden="true"></span><span>Проверить обновления</span></button></div>
+        <p class="up-checked" id="up-checked"></p>
       </div>
       <div id="up-task"></div>
       <section class="block glass" id="up-pkgs"></section>
       <section class="block glass" id="up-apps" hidden></section>
+      <section class="block glass" id="up-server" aria-labelledby="up-server-h">
+        <div class="block-h"><h2 id="up-server-h">Сервер</h2></div>
+        <div class="srv-row">
+          <div>
+            <p class="li-name">Перезагрузить сервер</p>
+            <p class="li-sub" id="up-server-note"></p>
+          </div>
+          <button class="pbtn ghost sm" id="reboot-btn-up"><span data-icon="power" aria-hidden="true"></span><span>Перезагрузить сервер</span></button>
+        </div>
+      </section>
     </section>
 
     <!-- ============ Образы ============ -->
@@ -143,6 +154,12 @@
       <div id="prune"></div>
       <ul class="block glass im-list" id="im-list"></ul>
     </section>
+
+    <!-- Подвал для телефона: боковой панели там нет -->
+    <div class="m-foot">
+      <p class="host" id="host-line-m"></p>
+      <button class="textbtn js-logout" hidden><span data-icon="sign-out" aria-hidden="true"></span>Выйти</button>
+    </div>
   </main>
 </div>
 

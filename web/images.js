@@ -46,10 +46,12 @@ export function renderImages(data) {
     const used = im.usedBy.length
       ? `нужен: ${im.usedBy.map(n => about({ name: n }).title).join(', ')}`
       : 'не используется';
+    const shortId = im.id.replace('sha256:', '').slice(0, 12);
     const li = h('li', { class: 'li', 'data-tone': im.usedBy.length ? 'ok' : 'idle' },
       h('span', { class: 'sdot' }),
-      h('div', {}, h('p', { class: 'li-name', title: im.tags.join(', ') || null, text: imgName(im) }),
-        h('p', { class: 'li-sub', text: im.id.replace('sha256:', '').slice(0, 12) })),
+      h('div', {}, h('p', { class: 'li-name', title: [...im.tags, shortId].join(', '), text: imgName(im) }),
+        h('p', { class: 'li-sub im-id', text: shortId }),
+        h('p', { class: 'li-sub im-used-m', text: used })), // на узком экране вместо ID
       h('p', { class: 'li-v num', text: fmtBytes(im.size) }),
       h('p', { class: 'li-sub', text: fmtAgo(Date.now() / 1000 - im.created) }),
       h('p', { class: 'im-used' + (im.usedBy.length ? '' : ' is-free'), text: used }),

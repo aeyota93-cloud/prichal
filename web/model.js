@@ -45,13 +45,14 @@ export const ACTIONS = {
   kill:    { label: 'Остановить принудительно', icon: 'lightning', busy: 'Останавливаю…', done: 'остановлен принудительно', verb: 'принудительно остановить', confirm: 'Да, остановить сразу', danger: true },
 };
 
+// main идут в первом ряду, more прячутся за кнопкой «Ещё» (редкие и опасные).
 export function availableActions(c) {
-  if (c.self) return ['restart'];
+  if (c.self) return { main: ['restart'], more: [] };
   switch (c.state) {
-    case 'running': return ['restart', 'pause', 'stop', 'kill'];
-    case 'paused': return ['unpause', 'stop', 'kill'];
-    case 'restarting': return ['stop', 'kill'];
-    default: return ['start'];
+    case 'running': return { main: ['restart', 'stop'], more: ['pause', 'kill'] };
+    case 'paused': return { main: ['unpause', 'stop'], more: ['kill'] };
+    case 'restarting': return { main: ['stop'], more: ['kill'] };
+    default: return { main: ['start'], more: [] };
   }
 }
 

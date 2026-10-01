@@ -80,6 +80,7 @@ ul { padding: 0; list-style: none; }
 .modal .confirm { border: 0; background: none; }
 .side-foot { margin-top: 18px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-left: 4px; }
 .host { color: var(--ink-3); font-size: 12.5px; }
+.m-foot { display: none; }
 
 /* на широком экране содержимое стоит по центру, а не прилипает к меню */
 .main { padding: 40px 48px 90px 24px; max-width: 1240px; width: 100%; min-width: 0; justify-self: center; }
@@ -129,6 +130,15 @@ ul { padding: 0; list-style: none; }
 .seg button:hover { color: var(--ink-2); }
 .seg button[aria-pressed="true"] { background: rgb(255 255 255 / .12); color: var(--ink); box-shadow: inset 0 1px 0 rgb(255 255 255 / .1); }
 .seg .n { margin-left: 4px; opacity: .6; }
+
+/* затухание у края, когда в меню или сегментах есть что прокрутить (классы ставит nav.js):
+   is-scroll-start: слева есть скрытое, is-scroll-end: справа есть скрытое */
+.is-scroll-start, .is-scroll-end {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent);
+}
+.is-scroll-start { --fade-l: 28px; }
+.is-scroll-end { --fade-r: 28px; }
 
 /* точки состояния */
 .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink); box-shadow: 0 0 10px rgb(255 255 255 / .7); flex: none; }
@@ -265,6 +275,10 @@ ul { padding: 0; list-style: none; }
 .act.danger:hover .rb { border-color: rgb(255 123 114 / .5); color: var(--bad); }
 .act:disabled { cursor: default; }
 .act.is-busy .rb .ico { animation: spin 1s linear infinite; }
+.act.has-hint { width: 150px; }
+.act-hint { color: var(--ink-3); font-size: 12px; line-height: 1.25; }
+.act[aria-expanded="true"] .rb { background: rgb(255 255 255 / .09); border-color: rgb(255 255 255 / .2); }
+.ct-more { flex: 0 0 100%; display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; }
 .act-sep { width: 1px; align-self: stretch; margin: 4px 14px 22px; background: var(--line); }
 .ct-note { color: var(--ink-3); font-size: 13px; align-self: center; margin-left: 10px; max-width: 320px; }
 
@@ -379,19 +393,16 @@ div.task .task-head { cursor: default; }
 .task .logs { margin: 0 14px 14px; max-height: 320px; }
 
 .hero-actions { margin-top: 24px; display: flex; flex-wrap: wrap; gap: 10px; }
-.ibtn {
-  margin-left: auto; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
-  border: 1px solid var(--line); background: rgb(255 255 255 / .04); color: var(--ink-2);
-  transition: background-color .2s, border-color .2s, color .2s;
-}
-.ibtn .ico { font-size: 17px; }
-.ibtn:hover { background: rgb(255 255 255 / .09); border-color: rgb(255 255 255 / .2); color: var(--ink); }
-.ibtn:disabled { opacity: .4; cursor: default; }
+.up-checked { color: var(--ink-3); font-size: 13px; margin-top: 10px; }
+.up-checked:empty { display: none; }
+.srv-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 6px 20px 16px; }
+.srv-row .li-sub { max-width: 460px; }
 
 /* ---------- Образы ---------- */
 #prune .pill-row { margin-top: 34px; }
 .im-list { margin-top: 14px; }
 .im-list .li { grid-template-columns: 26px minmax(0, 1fr) 90px 120px minmax(0, 220px) auto; }
+.im-used-m { display: none; }
 .im-used { color: var(--ink-2); font-size: 13.5px; }
 .im-used.is-free { color: var(--ink-3); }
 
@@ -460,23 +471,31 @@ body.is-offline .view { opacity: .5; }
   .ct-cpu, .ct-time { display: none; }
   .im-list .li { grid-template-columns: 26px minmax(0, 1fr) auto auto; }
   .im-list .li > :nth-child(4), .im-list .li > :nth-child(5) { display: none; }
+  /* на узком экране вместо короткого ID под названием видно, кому нужен образ */
+  .im-id { display: none; }
+  .im-used-m { display: block; }
   .li.app-row { grid-template-columns: 26px minmax(0, 1fr); }
   .li.app-row > :nth-child(n+3) { grid-column: 2; }
   .li.app-row .app-actions { justify-content: flex-start; }
 }
 @media (max-width: 820px) {
-  .seg { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .seg { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; scroll-padding-inline: 36px; }
   .seg button { white-space: nowrap; flex: none; }
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
   .side { position: static; height: auto; padding: 20px 16px 0; }
   .brand { margin-bottom: 14px; }
-  .nav { flex-direction: row; padding: 0 0 2px; overflow-x: auto; gap: 22px; scrollbar-width: none; border-bottom: 1px solid var(--line); }
+  .nav { flex-direction: row; padding: 0 0 2px; overflow-x: auto; gap: 22px; scrollbar-width: none; scroll-padding-inline: 36px; border-bottom: 1px solid var(--line); }
   .nav::before { display: none; }
   .nav button { white-space: nowrap; padding: 10px 0 12px; }
   .nav button[aria-current="page"]::before { left: 0; right: 0; top: auto; bottom: -3px; width: auto; height: 2px; }
   .nav .n { margin-left: 6px; }
-  .reboot { margin-top: 16px; }
+  .reboot { display: none; } /* на телефоне перезагрузка внизу раздела «Обновления» */
   .side-foot { display: none; }
+  .m-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 40px; padding: 0 4px; }
+  .act.has-hint { width: 120px; }
+  /* «Очистка» в Образах: подпись, текст и кнопка в две строки, а не друг на друге */
+  #prune .pill-row { grid-template-columns: minmax(0, 1fr); justify-items: start; }
+  #prune .pill-row .end { justify-content: flex-start; }
   .main { padding: 26px 16px 70px; }
   .pill-row { grid-template-columns: minmax(0, 1fr) auto; border-radius: 30px; padding: 12px 10px 12px 20px; }
   .pill-row .dots { display: none; }
@@ -484,7 +503,11 @@ body.is-offline .view { opacity: .5; }
   .ct { border-radius: 30px; }
   .ct-row { padding: 16px 20px; gap: 12px; }
   .ct-body { padding: 4px 20px 22px; }
-  .act { width: 74px; }
+  /* кнопки действий: ширина по подписи, ряд в одну строку без наезда подписей */
+  .ct-actions { gap: 6px 12px; }
+  .act { width: auto; min-width: 44px; font-size: 12px; }
+  .ct-actions > .act { white-space: nowrap; }
+  .ct-more { gap: 6px 12px; }
   .act-sep { display: none; }
   .details { grid-template-columns: minmax(0, 1fr); }
   .cl { grid-template-columns: 14px minmax(0, 1fr) auto; padding: 10px 16px; }
@@ -494,6 +517,7 @@ body.is-offline .view { opacity: .5; }
   .li > :nth-child(3) { grid-column: 2; }
   .im-list .li { grid-template-columns: 26px minmax(0, 1fr) auto; }
   .im-list .li > :nth-child(3) { grid-column: auto; }
+  .im-list .li > :nth-child(6) { grid-column: 2; justify-self: start; }
   .toasts { left: 16px; right: 16px; bottom: 16px; }
 }
 @media (prefers-reduced-motion: reduce) {

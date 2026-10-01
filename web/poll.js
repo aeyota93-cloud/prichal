@@ -51,7 +51,7 @@ export function renderHostLine() {
   const hv = lastOverview?.host;
   const os = upd.view?.system?.os;
   const parts = [lastOverview?.label, os?.replace(/ LTS$/, ''), hv && `${hv.cpus} ${plural(hv.cpus, 'ядро', 'ядра', 'ядер')}`].filter(Boolean);
-  $('#host-line').textContent = parts.join(' · ');
+  $('#host-line').textContent = $('#host-line-m').textContent = parts.join(' · ');
 }
 
 export function schedule() {

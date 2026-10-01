@@ -5,8 +5,9 @@ import { conns, loadConns } from './conns.js';
 import { loadImages } from './images.js';
 import { loadUpdates } from './updates.js';
 import { refresh, schedule } from './poll.js';
-import { go, viewFromHash, currentView } from './nav.js';
+import { go, viewFromHash, currentView, fadeEdges } from './nav.js';
 
+document.querySelectorAll('.nav, #ct-filter, #cn-seg').forEach(fadeEdges);
 document.querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => go(b.dataset.view)));
 
 // ---------- Старт ----------
@@ -23,11 +24,13 @@ window.addEventListener('popstate', () => go(viewFromHash(), { push: false }));
 window.addEventListener('hashchange', () => { if (viewFromHash() !== currentView) go(viewFromHash(), { push: false }); });
 api('/api/session').then(s => {
   if (!s.auth) return;
-  const btn = $('#logout');
-  btn.hidden = false;
-  btn.addEventListener('click', async () => {
-    await api('/api/logout', { method: 'POST' }).catch(() => {});
-    location.href = '/login.html';
+  // Кнопок «Выйти» две: в боковой панели и в подвале для телефона.
+  document.querySelectorAll('.js-logout').forEach(btn => {
+    btn.hidden = false;
+    btn.addEventListener('click', async () => {
+      await api('/api/logout', { method: 'POST' }).catch(() => {});
+      location.href = '/login.html';
+    });
   });
 }).catch(() => {});
 refresh().then(schedule);

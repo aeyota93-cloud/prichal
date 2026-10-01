@@ -8,20 +8,25 @@ import { renderHostLine } from './poll.js';
 // ---------- Обновления ----------
 
 const GROUPS = [
-  { key: 'security', title: 'Безопасность', note: '', open: true },
-  { key: 'docker', title: 'Docker', note: 'При установке Docker перезапустится: все контейнеры, включая эту панель, пропадут примерно на полминуты. Панель вернётся сама и покажет результат.', open: true },
+  { key: 'security', title: 'Безопасность', note: 'Закрывают известные уязвимости. Ставить стоит всегда.', open: true },
+  { key: 'docker', title: 'Docker', note: 'Не отмечено заранее: на время установки все контейнеры и панель пропадут примерно на полминуты. Отметьте, когда будет удобно.', open: true },
   { key: 'kernel', title: 'Ядро Linux', note: 'Новое ядро заработает после перезагрузки сервера.', open: true },
-  { key: 'other', title: 'Остальное', note: '', open: false },
+  { key: 'other', title: 'Остальное', note: 'Обычные обновления программ системы. Обычно безопасны.', open: false },
 ];
 
 export const upd = {
-  view: null, error: '', checking: false, selected: new Set(), log: '', offset: 0, taskId: null, timer: null, confirm: null,
+  view: null, error: '', checking: false, selected: new Set(), touched: false, log: '', offset: 0, taskId: null, timer: null, confirm: null,
   openGroups: new Set(GROUPS.filter(g => g.open).map(g => g.key)),
   backup: new Map(), // приложение -> делать ли копию данных
 };
 
 function taskRunning() {
   return upd.view?.task?.state === 'running';
+}
+
+// Рекомендуемое: всё, кроме Docker (его установка на время кладёт все контейнеры).
+function recommended(sys) {
+  return new Set((sys?.packages || []).filter(p => p.group !== 'docker').map(p => p.name));
 }
 
 export async function loadUpdates(fresh = false) {
@@ -31,7 +36,9 @@ export async function loadUpdates(fresh = false) {
     upd.view = v;
     upd.error = '';
     const names = new Set((v.system?.packages || []).map(p => p.name));
-    for (const n of [...upd.selected]) if (!names.has(n)) upd.selected.delete(n);
+    // Пока пользователь сам ничего не менял, выбор пересчитывается как «рекомендуемое».
+    if (!upd.touched) upd.selected = recommended(v.system);
+    else for (const n of [...upd.selected]) if (!names.has(n)) upd.selected.delete(n);
     renderUpdates();
     if (v.task) followTask(v.task);
   } catch (e) {
@@ -60,15 +67,19 @@ function renderCheckButtons() {
   btn.disabled = busy;
   btn.classList.toggle('is-busy', upd.checking);
   btn.lastElementChild.textContent = upd.checking ? 'Проверяю…' : 'Проверить обновления';
-  document.querySelectorAll('#view-updates .ibtn').forEach(b => { b.disabled = busy; });
+  renderChecked();
+}
+
+// Одна строка времени под кнопкой: берём самое старое из двух времён,
+// то есть насколько устарела хотя бы одна из частей.
+function renderChecked() {
+  const v = upd.view;
+  const times = [v?.system?.listsAt, v?.apps?.checkedAt].filter(Boolean);
+  $('#up-checked').textContent = upd.checking ? 'идёт проверка'
+    : times.length ? `Проверено ${fmtAgo(Date.now() / 1000 - Math.min(...times))}` : '';
 }
 
 $('#up-check').addEventListener('click', checkAll);
-
-// Круглая кнопка без подписи: что она делает, видно в подсказке.
-function iconBtn(title, onclick) {
-  return h('button', { class: 'ibtn', title, 'aria-label': title, disabled: upd.checking || taskRunning(), onclick }, icon('arrows-clockwise'));
-}
 
 function appUpdates(v) {
   return (v?.apps?.apps || []).filter(a => a.update).length;
@@ -152,8 +163,10 @@ function askUpd(kind) {
 }
 
 function cancelUpd() {
+  const was = upd.confirm;
   upd.confirm = null;
   renderUpdates();
+  if (was === 'install') $('#up-install')?.focus();
 }
 
 // ----- Перезагрузка -----
@@ -195,16 +208,25 @@ async function doReboot() {
   }
 }
 
+// Две кнопки с одним действием: в боковой панели (на телефоне её нет)
+// и в блоке «Сервер» внизу раздела «Обновления».
+const rebootBtns = [$('#reboot-btn'), $('#reboot-btn-up')];
+
 function renderRebootBtn() {
-  const btn = $('#reboot-btn');
   const need = !!upd.view?.system?.rebootRequired;
-  btn.className = 'pbtn sm reboot ' + (need ? 'white' : 'ghost');
-  btn.disabled = taskRunning();
-  btn.lastElementChild.textContent = need ? 'Нужна перезагрузка' : 'Перезагрузить сервер';
-  btn.title = need ? 'Новые версии части пакетов заработают после перезагрузки' : '';
+  for (const btn of rebootBtns) {
+    btn.classList.toggle('white', need);
+    btn.classList.toggle('ghost', !need);
+    btn.disabled = taskRunning();
+    btn.lastElementChild.textContent = need ? 'Нужна перезагрузка' : 'Перезагрузить сервер';
+    btn.title = need ? 'Новые версии части пакетов заработают после перезагрузки' : '';
+  }
+  $('#up-server-note').textContent = need
+    ? 'Новые версии части пакетов заработают после перезагрузки.'
+    : 'Сервер будет недоступен пару минут, контейнеры с автозапуском поднимутся сами.';
 }
 
-$('#reboot-btn').addEventListener('click', askReboot);
+for (const btn of rebootBtns) btn.addEventListener('click', askReboot);
 
 // ----- Задача и её журнал -----
 
@@ -395,9 +417,7 @@ function renderApps(v) {
   card.hidden = !v.appsError && !apps.length && !manual.length;
   if (card.hidden) return;
   const head = h('div', { class: 'block-h' },
-    h('h2', { text: 'Приложения' }),
-    h('span', { class: 'faint', text: ['docker compose', v.apps && `проверено ${fmtAgo(Date.now() / 1000 - v.apps.checkedAt)}`].filter(Boolean).join(' · ') }),
-    iconBtn('Проверить приложения', () => loadUpdates(true)));
+    h('h2', { text: 'Приложения', title: 'docker compose' }));
   const parts = [head];
   if (v.appsError) parts.push(h('p', { class: 'cn-empty', text: `Не удалось проверить: ${v.appsError}` }));
   if (apps.length) parts.push(h('ul', {}, apps.map(appRow)));
@@ -417,9 +437,9 @@ function renderApps(v) {
 
 // ----- Пакеты -----
 
-function groupCheckbox(pkgs) {
+function groupCheckbox(pkgs, key) {
   const n = pkgs.filter(p => upd.selected.has(p.name)).length;
-  const cb = h('input', { type: 'checkbox', class: 'rc', 'aria-label': 'Выбрать всю группу' });
+  const cb = h('input', { type: 'checkbox', class: 'rc', id: `grp-${key}`, 'aria-label': 'Выбрать всю группу' });
   cb.checked = n > 0 && n === pkgs.length;
   cb.indeterminate = n > 0 && n < pkgs.length;
   cb.disabled = taskRunning();
@@ -427,6 +447,7 @@ function groupCheckbox(pkgs) {
   cb.addEventListener('change', () => {
     const on = n < pkgs.length;
     for (const p of pkgs) on ? upd.selected.add(p.name) : upd.selected.delete(p.name);
+    upd.touched = true;
     upd.confirm = null;
     renderUpdates();
   });
@@ -440,31 +461,36 @@ function pkgRow(p) {
   cb.disabled = taskRunning();
   cb.addEventListener('change', () => {
     cb.checked ? upd.selected.add(p.name) : upd.selected.delete(p.name);
+    upd.touched = true;
     upd.confirm = null;
     renderUpdates();
   });
-  return h('li', { class: 'li' },
+  // Описание пакета приходит по-английски из apt: прячем его в подсказку.
+  return h('li', { class: 'li', title: p.summary || null },
     cb,
     h('label', { for: `pkg-${p.name}` },
-      h('span', { class: 'li-name' }, p.name, p.security && p.group !== 'security' ? h('span', { class: 'tagline', text: 'безопасность' }) : ''),
-      h('span', { class: 'li-sub', text: p.summary || '' })),
+      h('span', { class: 'li-name' }, p.name, p.security && p.group !== 'security' ? h('span', { class: 'tagline', text: 'безопасность' }) : '')),
     h('span', { class: 'li-v', title: `${p.from} → ${p.to}` }, h('span', { text: shortVer(p.from) }), icon('arrow-right'), h('b', { text: shortVer(p.to) })));
 }
 
-function selectOnly(pred) {
+function selectOnly(pred, touched = true) {
   upd.selected = new Set(upd.view.system.packages.filter(pred).map(p => p.name));
+  upd.touched = touched;
   upd.confirm = null;
   renderUpdates();
 }
 
 function renderPkgs(v) {
   const card = $('#up-pkgs');
+  // Список перестраивается целиком: возвращаем фокус, чтобы с клавиатуры можно было отмечать подряд.
+  const focusId = card.contains(document.activeElement) ? document.activeElement.id : '';
+  renderPkgsBody(v, card);
+  if (focusId) document.getElementById(focusId)?.focus();
+}
+
+function renderPkgsBody(v, card) {
   const sys = v.system;
-  const checked = sys?.listsAt ? `списки обновлены ${fmtAgo(Date.now() / 1000 - sys.listsAt)}` : '';
-  const head = h('div', { class: 'block-h' },
-    h('h2', { text: 'Пакеты системы' }),
-    h('span', { class: 'faint', text: [sys?.pm, checked].filter(Boolean).join(' · ') }),
-    sys?.supported ? iconBtn('Проверить пакеты: обновить их списки на сервере', () => startTask('/api/updates/check')) : '');
+  const head = h('div', { class: 'block-h' }, h('h2', { text: 'Пакеты системы', title: sys?.pm || null }));
   if (v.error) {
     card.replaceChildren(head, h('p', { class: 'cn-empty', text: `Не удалось получить список: ${v.error}` }));
     return;
@@ -479,17 +505,17 @@ function renderPkgs(v) {
   }
   const quick = h('div', { class: 'quick' },
     h('span', { class: 'faint', text: 'Выбрать:' }),
-    h('button', { class: 'textbtn', disabled: taskRunning(), onclick: () => selectOnly(p => p.security) }, 'только безопасность'),
-    h('button', { class: 'textbtn', disabled: taskRunning(), onclick: () => selectOnly(p => p.group !== 'docker') }, 'всё, кроме Docker'),
-    h('button', { class: 'textbtn', disabled: taskRunning(), onclick: () => selectOnly(() => true) }, 'всё'),
-    upd.selected.size ? h('button', { class: 'textbtn', disabled: taskRunning(), onclick: () => selectOnly(() => false) }, 'снять выбор') : '');
+    h('button', { class: 'textbtn', id: 'q-rec', disabled: taskRunning(), onclick: () => selectOnly(p => p.group !== 'docker', false) }, 'рекомендуемое'),
+    h('button', { class: 'textbtn', id: 'q-sec', disabled: taskRunning(), onclick: () => selectOnly(p => p.security) }, 'только безопасность'),
+    h('button', { class: 'textbtn', id: 'q-all', disabled: taskRunning(), onclick: () => selectOnly(() => true) }, 'всё'),
+    upd.selected.size ? h('button', { class: 'textbtn', id: 'q-none', disabled: taskRunning(), onclick: () => selectOnly(() => false) }, 'снять выбор') : '');
   const groups = GROUPS.map(g => {
     const pkgs = sys.packages.filter(p => p.group === g.key);
     if (!pkgs.length) return '';
     const n = pkgs.filter(p => upd.selected.has(p.name)).length;
     const det = h('details', { class: 'grp', open: upd.openGroups.has(g.key) },
       h('summary', {},
-        groupCheckbox(pkgs),
+        groupCheckbox(pkgs, g.key),
         h('span', { class: 'grp-title', text: g.title }),
         h('span', { class: 'faint', text: n ? `выбрано ${n} из ${pkgs.length}` : `${pkgs.length}` }),
         h('span', { class: 'ct-caret' }, icon('caret-down'))),
@@ -499,6 +525,9 @@ function renderPkgs(v) {
     return det;
   });
   const sel = sys.packages.filter(p => upd.selected.has(p.name));
+  // Docker есть в списке, но ни один его пакет не отмечен.
+  const dockerPkgs = sys.packages.filter(p => p.group === 'docker');
+  const dockerLeft = dockerPkgs.length > 0 && !dockerPkgs.some(p => upd.selected.has(p.name));
   let bar;
   if (upd.confirm === 'install' && sel.length) {
     const notes = [];
@@ -507,6 +536,7 @@ function renderPkgs(v) {
       if (sys.init !== 'systemd') notes.push('На этом сервере нет systemd, поэтому обновление Docker может оборвать саму установку. Надёжнее обновить Docker из терминала.');
     }
     if (sel.some(p => p.group === 'kernel')) notes.push('Новое ядро заработает после перезагрузки сервера.');
+    if (dockerLeft) notes.push('Docker не будет обновлён, его можно поставить отдельно.');
     notes.push('Установка займёт несколько минут, её ход будет виден вверху страницы.');
     bar = h('div', { class: 'bar' }, confirmBox({
       q: `Установить ${sel.length} ${plural(sel.length, 'пакет', 'пакета', 'пакетов')}?`,
@@ -515,8 +545,8 @@ function renderPkgs(v) {
     }));
   } else {
     bar = h('div', { class: 'bar' },
-      h('p', { class: 'faint', text: sel.length ? `выбрано ${sel.length} из ${sys.packages.length}` : 'отметьте, что установить' }),
-      h('button', { class: 'pbtn white', disabled: !sel.length || taskRunning(), onclick: () => askUpd('install') }, 'Установить', icon('arrow-right')));
+      h('p', { class: 'faint', text: sel.length ? `выбрано ${sel.length} из ${sys.packages.length}${dockerLeft ? ' · Docker не отмечен' : ''}` : 'отметьте, что установить' }),
+      h('button', { class: 'pbtn white', id: 'up-install', disabled: !sel.length || taskRunning(), onclick: () => askUpd('install') }, 'Установить', icon('arrow-right')));
   }
   card.replaceChildren(head, quick, ...groups, bar);
 }

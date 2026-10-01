@@ -13,6 +13,7 @@ const CONN_MS = 10000;
 export let conns = new Map(); // имя контейнера -> сервис
 let connTimer = null;
 let connSel = null; // какой сервис открыт в разделе
+let segShown = null; // для какого сервиса сегмент уже прокручен
 
 function linkName(u) {
   if (u === 'amnezia') return 'Основная ссылка';
@@ -159,12 +160,19 @@ function renderConns() {
   if (!conns.has(connSel)) {
     connSel = (services.find(s => s.state === 'running' && !s.error && connCount(s).online) || services[0]).container;
   }
-  $('#cn-seg').replaceChildren(...services.map(s => {
+  const seg = $('#cn-seg');
+  const scrolled = seg.scrollLeft; // перерисовка не должна сбрасывать прокрутку
+  seg.replaceChildren(...services.map(s => {
     const { online, total: t } = s.state === 'running' && !s.error ? connCount(s) : { online: null };
     return h('button', { 'aria-pressed': String(s.container === connSel), onclick: () => { connSel = s.container; renderConns(); } },
       about({ name: s.container }).title,
       online == null ? '' : h('span', { class: 'n', text: t == null ? String(online) : `${online}/${t}` }));
   }));
+  seg.scrollLeft = scrolled;
+  if (segShown !== connSel) { // выбор сменился: показываем выбранный сервис целиком
+    segShown = connSel;
+    seg.querySelector('[aria-pressed="true"]')?.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }
   const s = conns.get(connSel);
   $('#cn-list').replaceChildren(connBody(s, true), connNote(s));
 }

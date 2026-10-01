@@ -124,7 +124,13 @@ export function openContainer(id) {
 
 function buildBody(r) {
   r.built = true;
-  r.actions = h('div', { class: 'ct-actions' });
+  // Esc сворачивает ряд «Ещё» (в подтверждении Esc обрабатывает само подтверждение).
+  r.actions = h('div', { class: 'ct-actions', onkeydown: e => {
+    if (e.key !== 'Escape' || !r.moreOpen || r.mode !== 'idle' || e.target.closest('.confirm')) return;
+    r.moreOpen = false;
+    renderActions(r, true);
+    r.actions.querySelector('.act-more')?.focus();
+  } });
   r.details = h('dl', { class: 'details' });
   r.logBox = h('div', { class: 'logs', tabindex: '0', 'aria-label': 'Журнал контейнера' });
   r.tail = 300;
@@ -171,23 +177,36 @@ function renderDetails(r) {
   r.details.replaceChildren(...items);
 }
 
-function actButton(d, cls, onclick, label) {
-  return h('button', { class: 'act' + (cls ? ' ' + cls : ''), onclick }, h('span', { class: 'rb' }, icon(d.icon)), label || d.label);
+function actButton(d, cls, onclick, label, hint) {
+  return h('button', { class: 'act' + (cls ? ' ' + cls : '') + (hint ? ' has-hint' : ''), onclick },
+    h('span', { class: 'rb' }, icon(d.icon)), label || d.label, hint ? h('span', { class: 'act-hint', text: hint }) : '');
 }
 
 function renderActions(r, force = false) {
   if (r.mode !== 'idle' && !force) return;
-  const acts = availableActions(r.c);
-  const key = acts.join(',');
+  const { main, more } = availableActions(r.c);
+  const showMore = !!r.moreOpen && more.length > 0;
+  // В ключе и раскрытый ряд: опрос раз в 3 секунды не должен его схлопывать.
+  const key = `${main.join(',')}|${more.join(',')}|${showMore}`;
   if (!force && key === r.actionsKey) return;
   r.actionsKey = key;
   r.mode = 'idle';
-  const kids = acts.map((act, i) => {
-    const d = ACTIONS[act];
-    return actButton(d, i === 0 ? 'primary' : d.danger && act === 'kill' ? 'danger' : '', () => ask(r, act));
-  });
+  const actBtn = (act, cls, hint) => {
+    const b = actButton(ACTIONS[act], cls, () => ask(r, act), null, hint);
+    b.dataset.act = act;
+    return b;
+  };
+  const kids = main.map((act, i) => actBtn(act, i === 0 ? 'primary' : ''));
   kids.push(h('span', { class: 'act-sep', 'aria-hidden': 'true' }),
     actButton({ icon: 'scroll' }, '', () => { r.logBox.scrollIntoView({ block: 'center', behavior: 'smooth' }); r.logBox.focus({ preventScroll: true }); }, 'Журнал'));
+  if (more.length) {
+    const btn = actButton({ icon: 'dots-three' }, 'act-more', () => { r.moreOpen = !r.moreOpen; renderActions(r, true); r.actions.querySelector('.act-more')?.focus(); }, 'Ещё');
+    btn.setAttribute('aria-expanded', String(showMore));
+    kids.push(btn);
+  }
+  if (showMore) {
+    kids.push(h('div', { class: 'ct-more' }, more.map(act => actBtn(act, act === 'kill' ? 'danger' : '', act === 'kill' ? 'если обычная остановка не помогает' : ''))));
+  }
   if (r.c.self) kids.push(h('p', { class: 'ct-note', text: 'Это сама панель: выключить её отсюда нельзя, только перезапустить.' }));
   r.actions.replaceChildren(...kids);
 }
@@ -197,7 +216,7 @@ function ask(r, act) {
   if (!d.confirm) return run(r, act);
   r.mode = 'confirm';
   const a = about(r.c);
-  const cancel = () => { renderActions(r, true); r.actions.querySelector('button')?.focus(); };
+  const cancel = () => { renderActions(r, true); (r.actions.querySelector(`[data-act="${act}"]`) || r.actions.querySelector('button'))?.focus(); };
   r.actions.replaceChildren(confirmBox({
     q: `${cap(d.verb)} ${a.title}?`, text: confirmText(r.c, act), yes: d.confirm, danger: d.danger,
     onYes: () => run(r, act), onNo: cancel,
