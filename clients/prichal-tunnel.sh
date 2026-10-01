@@ -22,6 +22,8 @@ url="http://localhost:$port"
 (
   i=0
   while [ $i -lt 300 ]; do
+    # /dev/tcp works in bash (macOS sh is bash); elsewhere nc does the check.
+    # shellcheck disable=SC3025
     if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null || nc -z 127.0.0.1 "$port" 2>/dev/null; then
       open_url "$url"
       exit 0

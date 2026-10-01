@@ -3,6 +3,8 @@
 # restart, and back to the previous commit if the new version does not come
 # up. Arguments: project, service, working dir, compose files (comma
 # separated).
+# project and files are read by dc() from lib-compose.sh.
+# shellcheck disable=SC2034
 project=$1; svc=$2; wd=$3; files=$4
 cd "$wd" || exit 1
 git_setup
