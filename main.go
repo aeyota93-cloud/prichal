@@ -520,11 +520,7 @@ func (s *server) imageViews(ctx context.Context) ([]imageView, int64, error) {
 
 	var cache int64
 	if du, err := s.docker.DiskUsage(ctx); err == nil {
-		for _, b := range du.BuildCache {
-			if !b.InUse {
-				cache += b.Size
-			}
-		}
+		cache = du.ReclaimableCache()
 	}
 	return out, cache, nil
 }
@@ -558,7 +554,7 @@ func (s *server) removeImage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("remove image %s %v", id, im.Tags)
-		if err := s.docker.RemoveImage(ctx, id); err != nil {
+		if err := s.docker.RemoveImage(ctx, id, im.Tags); err != nil {
 			writeErr(w, err)
 			return
 		}
@@ -568,14 +564,37 @@ func (s *server) removeImage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusNotFound, map[string]string{"error": "образ не найден"})
 }
 
+// prune removes exactly what the Images page offers: images no container
+// needs (the helper image for host commands stays, Docker's own image prune
+// would take it) and the build cache. The freed space is measured, not
+// estimated.
 func (s *server) prune(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := ctxTimeout(r, 5*time.Minute)
 	defer cancel()
 	log.Printf("prune unused images and build cache")
-	n, err := s.docker.Prune(ctx)
+	imgs, _, err := s.imageViews(ctx)
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	before, errBefore := s.docker.DiskUsage(ctx)
+	for _, im := range imgs {
+		if len(im.UsedBy) > 0 {
+			continue
+		}
+		if err := s.docker.RemoveImage(ctx, im.ID, im.Tags); err != nil {
+			log.Printf("prune: image %s %v: %v", im.ID, im.Tags, err)
+		}
+	}
+	n, err := s.docker.PruneBuildCache(ctx)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	// Docker's own count includes cache entries shared with image layers,
+	// which stay on disk. What the page promised is measured instead.
+	if after, err := s.docker.DiskUsage(ctx); err == nil && errBefore == nil {
+		n = max(0, before.ImagesSize()-after.ImagesSize()) + max(0, before.ReclaimableCache()-after.ReclaimableCache())
 	}
 	writeJSON(w, http.StatusOK, map[string]int64{"reclaimed": n})
 }

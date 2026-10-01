@@ -901,15 +901,15 @@ function connTitle(s, c) {
   return c.label ? { main: c.label, sub: linkName(c.name) } : { main: linkName(c.name), sub: '' };
 }
 
+// Имя, карандаш сразу за ним, под именем — какая это ссылка.
 function nameCell(s, c) {
   const t = connTitle(s, c);
-  const cell = h('div', { class: 'cl-name-cell' },
-    h('div', { class: 'cl-name-text' },
-      h('p', { class: 'cl-name', title: t.main, text: t.main }),
-      t.sub ? h('p', { class: 'cl-sub', text: t.sub }) : ''));
+  const cell = h('div', { class: 'cl-name-cell' });
+  const name = h('p', { class: 'cl-name' }, h('span', { title: t.main, text: t.main }));
   if (s.kind === 'telemt') {
-    cell.append(h('button', { class: 'cl-edit', title: 'Подписать', 'aria-label': `Подписать: ${t.main}`, onclick: () => editLabel(cell, s, c) }, icon('pencil-simple')));
+    name.append(h('button', { class: 'cl-edit', title: 'Подписать', 'aria-label': `Подписать: ${t.main}`, onclick: () => editLabel(cell, s, c) }, icon('pencil-simple')));
   }
+  cell.append(name, t.sub ? h('p', { class: 'cl-sub', text: t.sub }) : '');
   return cell;
 }
 
@@ -958,17 +958,16 @@ function connRow(s, c, big) {
       traffic = [bytesCell('arrow-down', c.down, 'Скачал через VPN'), bytesCell('arrow-up', c.up, 'Отправил через VPN')];
     }
   }
+  // Адреса — второй строкой под «кто на связи», а не отдельной строкой.
+  const ips = c.ips || [], recent = c.recentIps || [];
+  const addr = ips.length ? ips : recent;
   const li = h('li', { class: 'cl' + (big ? ' glass' : ''), 'data-tone': tone },
     h('span', { class: 'sdot', title: label }),
     nameCell(s, c),
-    h('p', { class: 'cl-seen', text: seen }),
+    h('div', { class: 'cl-seen' },
+      h('p', { text: seen }),
+      addr.length ? h('p', { title: addr.join(', ') }, ips.length ? '' : 'недавно: ', h('code', { text: addr.join(', ') })) : ''),
     h('span', { class: 'cl-tr num' }, traffic));
-  const ips = c.ips || [], recent = c.recentIps || [];
-  if (ips.length || recent.length) {
-    li.append(h('div', { class: 'cl-ips' },
-      ips.length ? h('span', {}, 'на связи:', ips.map(ip => h('code', { text: ip }))) : '',
-      recent.length ? h('span', {}, 'недавно:', recent.map(ip => h('code', { text: ip }))) : ''));
-  }
   return li;
 }
 

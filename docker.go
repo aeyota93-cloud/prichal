@@ -359,49 +359,70 @@ func (d *Docker) Images(ctx context.Context) ([]ImageSummary, error) {
 }
 
 type DiskUsage struct {
+	LayersSize int64 `json:"LayersSize"`
+	ImageUsage struct {
+		TotalSize int64 `json:"TotalSize"`
+	} `json:"ImageUsage"` // newer APIs; LayersSize may go away
 	BuildCache []struct {
-		Size  int64 `json:"Size"`
-		InUse bool  `json:"InUse"`
+		Size   int64 `json:"Size"`
+		InUse  bool  `json:"InUse"`
+		Shared bool  `json:"Shared"` // layers of an image: removing the entry frees nothing
 	} `json:"BuildCache"`
 }
 
 func (d *Docker) DiskUsage(ctx context.Context) (*DiskUsage, error) {
 	var out DiskUsage
-	err := d.getJSON(ctx, "/system/df", url.Values{"type": {"build-cache"}}, &out)
+	err := d.getJSON(ctx, "/system/df", url.Values{"type": {"build-cache", "image"}}, &out)
 	return &out, err
 }
 
-func (d *Docker) RemoveImage(ctx context.Context, id string) error {
-	resp, err := d.do(ctx, http.MethodDelete, "/images/"+url.PathEscape(id), nil)
-	if err != nil {
-		return err
+// ReclaimableCache is what PruneBuildCache frees.
+func (du *DiskUsage) ReclaimableCache() int64 {
+	var n int64
+	for _, b := range du.BuildCache {
+		if !b.InUse && !b.Shared {
+			n += b.Size
+		}
 	}
-	resp.Body.Close()
+	return n
+}
+
+// ImagesSize is the disk space taken by all image layers.
+func (du *DiskUsage) ImagesSize() int64 {
+	if du.LayersSize > 0 {
+		return du.LayersSize
+	}
+	return du.ImageUsage.TotalSize
+}
+
+// RemoveImage removes an image by ID. One with several tags is untagged
+// tag by tag (removing the last tag removes the image): Docker refuses to
+// delete it by ID without force, and force would also take images that
+// stopped containers still need.
+func (d *Docker) RemoveImage(ctx context.Context, id string, tags []string) error {
+	refs := []string{id}
+	if len(tags) > 1 {
+		refs = tags
+	}
+	for _, ref := range refs {
+		resp, err := d.do(ctx, http.MethodDelete, "/images/"+url.PathEscape(ref), nil)
+		if err != nil {
+			return err
+		}
+		resp.Body.Close()
+	}
 	return nil
 }
 
-// Prune removes every image not used by any container (running or stopped)
-// plus the unused build cache. Returns bytes reclaimed.
-func (d *Docker) Prune(ctx context.Context) (int64, error) {
-	var total int64
-
-	var img struct{ SpaceReclaimed int64 }
-	resp, err := d.do(ctx, http.MethodPost, "/images/prune", url.Values{"filters": {`{"dangling":["false"]}`}})
+// PruneBuildCache removes all build cache nothing uses, the cached Dockerfile
+// frontend included (docker builder prune --all). Returns bytes reclaimed.
+func (d *Docker) PruneBuildCache(ctx context.Context) (int64, error) {
+	var bc struct{ SpaceReclaimed int64 }
+	resp, err := d.do(ctx, http.MethodPost, "/build/prune", url.Values{"all": {"true"}})
 	if err != nil {
 		return 0, err
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&img)
-	resp.Body.Close()
-	total += img.SpaceReclaimed
-
-	var bc struct{ SpaceReclaimed int64 }
-	resp, err = d.do(ctx, http.MethodPost, "/build/prune", nil)
-	if err != nil {
-		return total, err
-	}
+	defer resp.Body.Close()
 	_ = json.NewDecoder(resp.Body).Decode(&bc)
-	resp.Body.Close()
-	total += bc.SpaceReclaimed
-
-	return total, nil
+	return bc.SpaceReclaimed, nil
 }
