@@ -154,7 +154,7 @@ func (c *Collector) collect(ctx context.Context) (*Overview, error) {
 		go func(i int, s ContainerSummary) {
 			defer wg.Done()
 			v := ContainerView{ID: s.ID, Name: s.Name(), Image: s.Image, State: s.State, Ports: []string{}}
-			v.Self = c.selfID != "" && strings.HasPrefix(s.ID, c.selfID)
+			v.Self = isSelf(c.selfID, s.ID)
 			v.Identity = identify(v.Name, v.Image, s.Labels["com.docker.compose.service"], v.Self)
 			v.Project = s.Labels["com.docker.compose.project"]
 			seen := map[string]bool{}

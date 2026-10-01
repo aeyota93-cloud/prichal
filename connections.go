@@ -28,23 +28,8 @@ type probe struct {
 	cmd  []string
 }
 
-// Every Amnezia protocol lives in a container with a fixed name prefix. The
-// scripts find their own config inside, so different Amnezia versions (awg,
-// awg2, plain WireGuard) work without knowing interface names in advance.
-const wgScript = `f=""
-for c in /opt/amnezia/*/*.conf; do grep -qs '^\[Interface\]' "$c" && { f=$c; break; }; done
-[ -n "$f" ] || { echo "в контейнере нет настроек WireGuard" >&2; exit 3; }
-d=${f%/*}; i=${f##*/}; i=${i%.conf}
-t=wg; command -v awg >/dev/null 2>&1 && t=awg
-$t show "$i" latest-handshakes; echo @@@; $t show "$i" transfer; echo @@@; cat "$d/clientsTable" 2>/dev/null`
-
-// The OpenVPN status file lives in openvpn's working directory.
-const openvpnScript = `cd /proc/$(pgrep -x openvpn | head -n1)/cwd 2>/dev/null && cat openvpn-status.log; echo @@@; cat /opt/amnezia/openvpn/clientsTable 2>/dev/null`
-
-// telemt answers only on 127.0.0.1 inside its container; the port comes from
-// its own config.
-const telemtScript = `p=$(sed -n '/^\[server\.api\]/,/^\[\[/p' /data/config.toml 2>/dev/null | sed -n 's/^listen *= *"[^"]*:\([0-9][0-9]*\)".*/\1/p' | head -n1)
-curl -s -m 3 "http://127.0.0.1:${p:-9091}/v1/stats/users"`
+// Every Amnezia protocol lives in a container with a fixed name prefix; the
+// probe scripts are scripts/wg.sh, openvpn.sh and telemt.sh.
 
 // probeFor picks how to ask an Amnezia container about its clients.
 func probeFor(name string) (probe, bool) {

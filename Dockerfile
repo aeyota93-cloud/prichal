@@ -7,6 +7,7 @@ WORKDIR /src
 COPY go.mod ./
 COPY *.go ./
 COPY web ./web
+COPY scripts ./scripts
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w" -o /prichal .
 
 FROM scratch

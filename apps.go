@@ -64,9 +64,10 @@ type Apps struct {
 	reg    *registry
 	selfID string
 
-	mu   sync.Mutex
-	view *AppsView
-	at   time.Time
+	mu        sync.Mutex // guards view and at
+	view      *AppsView
+	at        time.Time
+	collectMu sync.Mutex // one collection at a time; it takes up to a minute
 }
 
 func NewApps(d *Docker, selfID string) *Apps {
@@ -93,17 +94,34 @@ func (a *Apps) Find(ctx context.Context, key string) (*App, error) {
 	return nil, nil
 }
 
+// View returns the cached listing, or collects a new one. The cache stays
+// readable while a collection runs; a caller that arrives during one waits
+// for it and takes its result instead of starting another.
 func (a *Apps) View(ctx context.Context, fresh bool) (*AppsView, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if !fresh && a.view != nil && time.Since(a.at) < appsCacheFor {
-		return a.view, nil
+	asked := time.Now()
+	cached := func() *AppsView {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if a.view != nil && ((!fresh && time.Since(a.at) < appsCacheFor) || a.at.After(asked)) {
+			return a.view
+		}
+		return nil
+	}
+	if v := cached(); v != nil {
+		return v, nil
+	}
+	a.collectMu.Lock()
+	defer a.collectMu.Unlock()
+	if v := cached(); v != nil {
+		return v, nil
 	}
 	v, err := a.collect(ctx)
 	if err != nil {
 		return nil, err
 	}
+	a.mu.Lock()
 	a.view, a.at = v, time.Now()
+	a.mu.Unlock()
 	return v, nil
 }
 
@@ -138,7 +156,7 @@ func (a *Apps) collect(ctx context.Context) (*AppsView, error) {
 		if isHelper(name) {
 			continue
 		}
-		self := a.selfID != "" && strings.HasPrefix(c.ID, a.selfID)
+		self := isSelf(a.selfID, c.ID)
 		project, service := c.Labels["com.docker.compose.project"], c.Labels["com.docker.compose.service"]
 		id := identify(name, c.Image, service, self)
 		if project == "" || c.Labels["com.docker.compose.project.working_dir"] == "" {
@@ -278,36 +296,3 @@ func (a *Apps) volumeSizes(ctx context.Context) map[string]int64 {
 	}
 	return out
 }
-
-// appUpdateScript updates one compose service. Positional arguments:
-// project, service, working dir, compose files (comma separated), backup
-// (1/0), helper image, then the volumes to back up.
-const appUpdateScript = `project=$1; svc=$2; wd=$3; files=$4; backup=$5; helper=$6; shift 6
-cd "$wd"
-fargs=""
-old_ifs=$IFS; IFS=,
-for f in $files; do fargs="$fargs -f $f"; done
-IFS=$old_ifs
-dc() { docker compose -p "$project" $fargs "$@"; }
-echo "== Скачиваю новую версию ($svc)"
-dc pull "$svc"
-ok=0
-trap '[ "$ok" = 1 ] || { echo "!! Ошибка. Запускаю $svc обратно"; dc up -d "$svc"; }' EXIT
-if [ "$backup" = 1 ] && [ $# -gt 0 ]; then
-  echo "== Останавливаю $svc, чтобы сделать копию данных"
-  dc stop "$svc"
-  dir=/var/backups/prichal/$project/$(date +%Y%m%d-%H%M%S)
-  mkdir -p "$dir"
-  for v in "$@"; do
-    echo "   копирую том $v"
-    docker run --rm --name "prichal-host-backup-$$" -v "$v":/data:ro -v "$dir":/backup "$helper" tar czf "/backup/$v.tar.gz" -C /data .
-  done
-  for f in $(echo "$files" | tr , ' '); do cp "$f" "$dir"/ 2>/dev/null || true; done
-  echo "== Копия данных: $dir"
-fi
-echo "== Запускаю новую версию"
-dc up -d "$svc"
-ok=1
-docker image prune -f >/dev/null 2>&1 || true
-ls -1dt /var/backups/prichal/"$project"/*/ 2>/dev/null | tail -n +6 | xargs -r rm -rf
-echo "== Готово. Хранятся 5 последних копий в /var/backups/prichal/$project"`

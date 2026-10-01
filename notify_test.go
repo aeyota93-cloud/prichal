@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func testNotifier() (*Notifier, *Telegram) {
@@ -81,5 +82,22 @@ func TestTokenRedacted(t *testing.T) {
 	got := tg.redact(errors.New(`Post "https://api.telegram.org/bot123:SECRET/sendMessage": timeout`))
 	if strings.Contains(got, "SECRET") {
 		t.Errorf("token leaked: %s", got)
+	}
+}
+
+func TestNotifierForgets(t *testing.T) {
+	n, _ := testNotifier()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	n.handle(ctx, ev("kill", "gone", "x"))
+	n.handle(ctx, ev("die", "gone2", "y", "exitCode", "1"))
+	n.handle(ctx, ev("oom", "gone3", "z"))
+	n.forget(time.Now())
+	if len(n.lastKill) != 1 || len(n.crashes) != 1 || len(n.sent) != 1 {
+		t.Fatalf("fresh entries must stay: %d %d %d", len(n.lastKill), len(n.crashes), len(n.sent))
+	}
+	n.forget(time.Now().Add(time.Hour))
+	if len(n.lastKill)+len(n.crashes)+len(n.sent) != 0 {
+		t.Errorf("old entries must go: %v %v %v", n.lastKill, n.crashes, n.sent)
 	}
 }

@@ -2,4 +2,5 @@
 !go.mod
 !*.go
 !web
+!scripts
 *_test.go

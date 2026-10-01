@@ -51,11 +51,7 @@ func (j *Journal) Add(tone, text string) {
 	if j.path == "" {
 		return
 	}
-	b, _ := json.Marshal(j.list)
-	tmp := j.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err == nil {
-		_ = os.Rename(tmp, j.path)
-	}
+	_ = writeJSONAtomic(j.path, j.list)
 }
 
 // List returns the events newest first.

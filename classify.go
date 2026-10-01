@@ -68,23 +68,10 @@ var knownImages = map[string]Identity{
 }
 
 // imageRepo turns "ghcr.io/wg-easy/wg-easy:15" or "docker.io/library/nginx@sha256:…"
-// into "wg-easy/wg-easy" / "nginx".
+// into "wg-easy/wg-easy" / "nginx": the repository without registry, tag
+// and the "library/" of official Docker Hub images.
 func imageRepo(image string) string {
-	ref := image
-	if i := strings.Index(ref, "@"); i >= 0 {
-		ref = ref[:i]
-	}
-	if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
-		ref = ref[:i]
-	}
-	parts := strings.Split(ref, "/")
-	if len(parts) > 1 && (strings.ContainsAny(parts[0], ".:") || parts[0] == "localhost") {
-		parts = parts[1:] // registry host
-	}
-	if len(parts) == 2 && parts[0] == "library" {
-		parts = parts[1:]
-	}
-	return strings.Join(parts, "/")
+	return strings.TrimPrefix(parseRef(image).Repo, "library/")
 }
 
 // identify names a container. service is the docker compose service name, if

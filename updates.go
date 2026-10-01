@@ -77,11 +77,12 @@ type Updates struct {
 	state    string   // path of updates.json in DATA_DIR ("" = memory only)
 	journal  *Journal // finished tasks go to the timeline
 
-	mu     sync.Mutex
-	list   *SystemView
-	listAt time.Time
-	task   *Task
-	listMu sync.Mutex // one host listing at a time
+	mu      sync.Mutex
+	list    *SystemView
+	listAt  time.Time
+	task    *Task
+	listMu  sync.Mutex // one host listing at a time
+	startMu sync.Mutex // one task (or reboot) start at a time
 }
 
 func NewUpdates(d *Docker, apps *Apps, hostRoot, dataDir string) *Updates {
@@ -102,11 +103,7 @@ func (u *Updates) saveLocked() {
 	if u.state == "" {
 		return
 	}
-	b, _ := json.MarshalIndent(map[string]any{"task": u.task}, "", "  ")
-	tmp := u.state + ".tmp"
-	if os.WriteFile(tmp, b, 0o600) == nil {
-		_ = os.Rename(tmp, u.state)
-	}
+	_ = writeJSONAtomic(u.state, map[string]any{"task": u.task})
 }
 
 // hostFile reads a file of the host: through the read-only /host mount in
@@ -126,46 +123,6 @@ func (u *Updates) hostFile(ctx context.Context, path string) ([]byte, error) {
 }
 
 // ---------- Listing ----------
-
-// listScript runs on the host (POSIX sh) and prints @@-sections that
-// parseListing understands. It never touches the network: lists are only as
-// fresh as the last "check".
-const listScript = `
-pm=none
-for p in apt-get dnf yum apk pacman zypper; do
-  if command -v $p >/dev/null 2>&1; then pm=$p; break; fi
-done
-[ "$pm" = apt-get ] && pm=apt
-echo "@@PM $pm"
-if [ -d /run/systemd/system ]; then echo "@@INIT systemd"; else echo "@@INIT other"; fi
-. /etc/os-release 2>/dev/null; echo "@@OS ${PRETTY_NAME:-Linux}"
-echo "@@KERNEL $(uname -r)"
-case $pm in
-apt)
-  echo "@@STAMP $(stat -c %Y /var/lib/apt/periodic/update-success-stamp 2>/dev/null || stat -c %Y /var/lib/apt/lists 2>/dev/null || echo 0)"
-  if [ -f /run/reboot-required ]; then echo "@@REBOOT"; cat /run/reboot-required.pkgs 2>/dev/null; fi
-  echo "@@UPGRADABLE"; apt list --upgradable 2>/dev/null
-  echo "@@SUMMARY"; dpkg-query -W -f='${Package}\t${binary:Summary}\n'
-  ;;
-dnf|yum)
-  echo "@@STAMP $(stat -c %Y /var/cache/dnf/last_makecache 2>/dev/null || stat -c %Y /var/cache/$pm 2>/dev/null || echo 0)"
-  $pm needs-restarting -r >/dev/null 2>&1; rc=$?
-  if [ $rc -eq 1 ]; then echo "@@REBOOT"
-  elif [ $rc -ne 0 ]; then
-    latest=$(rpm -q --last kernel-core kernel 2>/dev/null | grep -v 'not installed' | head -n1 | awk '{print $1}' | sed 's/^kernel-core-//; s/^kernel-//')
-    [ -n "$latest" ] && [ "$latest" != "$(uname -r)" ] && echo "@@REBOOT"
-  fi
-  echo "@@UPGRADABLE"; $pm -q -C check-update 2>/dev/null
-  echo "@@SECURITY"; $pm -q -C updateinfo list --security --available 2>/dev/null
-  echo "@@INSTALLED"; rpm -qa --qf '%{NAME}.%{ARCH}\t%{VERSION}-%{RELEASE}\t%{SUMMARY}\n'
-  ;;
-apk)
-  idx=$(ls -t /var/cache/apk/APKINDEX.* /lib/apk/db/installed 2>/dev/null | head -n1)
-  echo "@@STAMP $(stat -c %Y "$idx" 2>/dev/null || echo 0)"
-  echo "@@UPGRADABLE"; apk version -l '<' 2>/dev/null
-  ;;
-esac
-`
 
 var (
 	aptLine = regexp.MustCompile(`^([^/\s]+)/(\S+)\s+(\S+)\s+\S+\s+\[upgradable from: ([^\]]+)\]`)
@@ -354,43 +311,30 @@ func (u *Updates) View(ctx context.Context, fresh bool) *UpdatesView {
 
 // ---------- Tasks ----------
 
-const aptOpts = `-o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o APT::Get::Always-Include-Phased-Updates=true`
-
-// Scripts are POSIX sh (Alpine has no bash). The first argument of the
-// package scripts is the package manager.
-var taskScripts = map[string]string{
-	"check": `pm=$1
-echo "== Обновляю списки пакетов"
-case $pm in
-  apt) apt-get -o DPkg::Lock::Timeout=600 update ;;
-  dnf|yum) $pm -q makecache --refresh 2>/dev/null || $pm -q makecache ;;
-  apk) apk update ;;
-  *) echo "!! $pm не поддерживается"; exit 2 ;;
-esac
-echo "== Готово"`,
-
-	"install": `pm=$1; shift
-echo "== Устанавливаю: $*"
-case $pm in
-  apt) apt-get -y ` + aptOpts + ` install --only-upgrade "$@" ;;
-  dnf|yum) $pm -y upgrade "$@" ;;
-  apk) apk add --upgrade "$@" ;;
-  *) echo "!! $pm не поддерживается"; exit 2 ;;
-esac
-echo "== Готово"
-if [ -f /run/reboot-required ]; then echo "== Для части обновлений нужна перезагрузка сервера"; fi`,
-
-	"app": appUpdateScript,
-	"git": gitUpdateScript,
-}
-
 var errBusy = errors.New("уже выполняется другая задача, дождитесь её окончания")
 
+// taskWrapper runs script in a subshell with set -e, writes its output to
+// dir/<id>.log and the exit code to dir/<id>.exit, and keeps the last 20 logs.
+func taskWrapper(dir, id, script string) string {
+	return fmt.Sprintf(`export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
+mkdir -p %[1]s
+( set -e
+%[2]s
+) > %[1]s/%[3]s.log 2>&1
+echo $? > %[1]s/%[3]s.exit
+ls -1t %[1]s/*.log | tail -n +21 | sed 's/\.log$//' | while read -r f; do rm -f "$f.log" "$f.exit"; done`,
+		dir, script, id)
+}
+
+// Start runs a task on the host. Only one task runs at a time: the check
+// and the start happen under startMu, so two quick clicks cannot both pass.
 func (u *Updates) Start(ctx context.Context, kind, title string, args []string) (*Task, error) {
 	script, ok := taskScripts[kind]
 	if !ok {
 		return nil, fmt.Errorf("unknown task %q", kind)
 	}
+	u.startMu.Lock()
+	defer u.startMu.Unlock()
 	if t := u.Task(ctx); t != nil && t.State == "running" {
 		return nil, errBusy
 	}
@@ -403,14 +347,7 @@ func (u *Updates) Start(ctx context.Context, kind, title string, args []string) 
 	}
 	now := time.Now()
 	id := kind + "-" + now.UTC().Format("20060102-150405")
-	wrapper := fmt.Sprintf(`export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
-mkdir -p %[1]s
-( set -e
-%[2]s
-) > %[1]s/%[3]s.log 2>&1
-echo $? > %[1]s/%[3]s.exit
-ls -1t %[1]s/*.log | tail -n +21 | sed 's/\.log$//' | while read -r f; do rm -f "$f.log" "$f.exit"; done`,
-		taskDir, script, id)
+	wrapper := taskWrapper(taskDir, id, script)
 	var cmd []string
 	runner := "systemd"
 	if sys.Init == "systemd" {
@@ -450,6 +387,7 @@ func (u *Updates) Task(ctx context.Context) *Task {
 		return t
 	}
 	b, err := u.hostFile(ctx, taskDir+"/"+t.ID+".exit")
+	up := readUptime()
 	cp := *t
 	switch {
 	case err == nil:
@@ -459,7 +397,7 @@ func (u *Updates) Task(ctx context.Context) *Task {
 		if code != 0 {
 			cp.State = "failed"
 		}
-	case readUptime() >= 0 && time.Now().Unix()-t.Started > int64(readUptime())+60:
+	case up >= 0 && time.Now().Unix()-t.Started > int64(up)+60:
 		cp.State, cp.Finished = "interrupted", time.Now().Unix() // the server rebooted meanwhile
 	case t.Runner == "container" && !u.docker.Exists(ctx, helperPrefix+"task-"+t.ID):
 		cp.State, cp.Finished = "interrupted", time.Now().Unix() // Docker restarted meanwhile
@@ -502,7 +440,7 @@ func (u *Updates) TaskLog(ctx context.Context, offset int) (string, int) {
 		return "", 0
 	}
 	b, err := u.hostFile(ctx, taskDir+"/"+t.ID+".log")
-	if err != nil || offset > len(b) {
+	if err != nil || offset < 0 || offset > len(b) {
 		return "", len(b)
 	}
 	return string(b[offset:]), len(b)
@@ -579,6 +517,8 @@ func (u *Updates) UpdateApp(ctx context.Context, key string, backup bool) (*Task
 }
 
 func (u *Updates) Reboot(ctx context.Context) error {
+	u.startMu.Lock()
+	defer u.startMu.Unlock()
 	if t := u.Task(ctx); t != nil && t.State == "running" {
 		return errBusy
 	}

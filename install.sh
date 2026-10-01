@@ -75,4 +75,7 @@ say "=== Причал работает на 127.0.0.1:$port ==="
 say "Откройте на своём компьютере SSH-туннель:"
 say "  ssh -N -L $port:127.0.0.1:$port root@${addr:-АДРЕС-СЕРВЕРА}"
 say "и зайдите в браузере на http://localhost:$port"
+if ! grep -q '^PRICHAL_PASSWORD=..*' .env; then
+  say "При первом входе панель попросит придумать пароль."
+fi
 say "Готовые ярлыки для Windows, macOS и Linux лежат в папке clients/."

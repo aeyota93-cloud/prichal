@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -148,12 +151,12 @@ func TestPkgNameRejectsInjection(t *testing.T) {
 func TestDigestSlot(t *testing.T) {
 	// Wednesday 2026-09-30 13:00 MSK -> Sunday 2026-09-27 12:00 MSK.
 	got := lastDigestSlot(time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC))
-	if want := time.Date(2026, 9, 27, 12, 0, 0, 0, msk); !got.Equal(want) {
+	if want := time.Date(2026, 9, 27, 12, 0, 0, 0, zone); !got.Equal(want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 	// Sunday 11:00 MSK is before the slot -> the previous Sunday.
 	got = lastDigestSlot(time.Date(2026, 10, 4, 8, 0, 0, 0, time.UTC))
-	if want := time.Date(2026, 9, 27, 12, 0, 0, 0, msk); !got.Equal(want) {
+	if want := time.Date(2026, 9, 27, 12, 0, 0, 0, zone); !got.Equal(want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
@@ -171,5 +174,63 @@ func TestParseGitCheck(t *testing.T) {
 	}
 	if g, msg := parseGitCheck("ERR нет сети\n"); g != nil || msg != "нет сети" {
 		t.Fatalf("ERR: %+v %q", g, msg)
+	}
+}
+
+func TestInstallOnlyListedPackages(t *testing.T) {
+	u := &Updates{docker: fakeDocker(t, `{}`)}
+	u.list, u.listAt = &SystemView{PM: "apt", Supported: true, Init: "systemd", Packages: []PkgUpdate{{Name: "docker-ce"}, {Name: "libc6"}}}, time.Now()
+	ctx := context.Background()
+	for _, bad := range [][]string{{"vim"}, {"docker-ce", "evil; rm -rf /"}, {"-oAPT::Update::Pre-Invoke::=sh"}} {
+		if _, err := u.Install(ctx, bad); err == nil || !strings.Contains(err.Error(), "нет в списке") {
+			t.Errorf("%q must be refused, got %v", bad, err)
+		}
+	}
+	if _, err := u.Install(ctx, nil); err == nil {
+		t.Error("empty selection must be refused")
+	}
+	// Listed packages pass the check; the fake Docker then fails the start.
+	if _, err := u.Install(ctx, []string{"docker-ce", "libc6", "docker-ce"}); err == nil || strings.Contains(err.Error(), "нет в списке") {
+		t.Errorf("listed packages must pass the check, got %v", err)
+	}
+}
+
+func TestTaskLogOffset(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, taskDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "x.log"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	u := &Updates{hostRoot: root, task: &Task{ID: "x"}}
+	ctx := context.Background()
+	for _, c := range []struct {
+		offset, next int
+		text         string
+	}{{0, 5, "hello"}, {3, 5, "lo"}, {5, 5, ""}, {9, 5, ""}, {-5, 5, ""}} {
+		if text, next := u.TaskLog(ctx, c.offset); text != c.text || next != c.next {
+			t.Errorf("offset %d: %q %d", c.offset, text, next)
+		}
+	}
+}
+
+func TestSplitRef(t *testing.T) {
+	for in, want := range map[string][2]string{
+		"alpine:3.24":         {"alpine", "3.24"},
+		"alpine":              {"alpine", "latest"},
+		helperImage:           {"alpine", strings.TrimPrefix(helperImage, "alpine@")},
+		"localhost:5000/app":  {"localhost:5000/app", "latest"},
+		"ghcr.io/a/b:1.2-rc1": {"ghcr.io/a/b", "1.2-rc1"},
+	} {
+		if repo, tag := splitRef(in); repo != want[0] || tag != want[1] {
+			t.Errorf("%s: %s %s", in, repo, tag)
+		}
+	}
+	if !isHelperImage(ImageSummary{RepoDigests: []string{helperImage}}) ||
+		!isHelperImage(ImageSummary{RepoDigests: []string{"docker.io/library/" + helperImage}}) ||
+		isHelperImage(ImageSummary{RepoDigests: []string{"alpine@sha256:0000"}}) {
+		t.Error("helper image detection is wrong")
 	}
 }

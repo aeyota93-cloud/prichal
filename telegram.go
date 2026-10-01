@@ -71,11 +71,7 @@ func (t *Telegram) saveLocked() {
 	if t.path == "" {
 		return
 	}
-	b, _ := json.MarshalIndent(t.state, "", "  ")
-	tmp := t.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err == nil {
-		_ = os.Rename(tmp, t.path)
-	}
+	_ = writeJSONAtomic(t.path, t.state)
 }
 
 func (t *Telegram) chat() int64 {

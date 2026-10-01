@@ -16,14 +16,17 @@
     <svg viewBox="0 0 256 256" fill="currentColor" class="ico" aria-hidden="true"><path d="M224,114H200a6,6,0,0,0,0,12h17.8A90.13,90.13,0,0,1,134,209.78V93.4a30,30,0,1,0-12,0V209.78A90.13,90.13,0,0,1,38.2,126H56a6,6,0,0,0,0-12H32a6,6,0,0,0-6,6,102,102,0,0,0,204,0A6,6,0,0,0,224,114ZM110,64a18,18,0,1,1,18,18A18,18,0,0,1,110,64Z"/></svg>
     Причал
   </p>
-  <h1>Вход в панель</h1>
+  <h1 id="title">Вход в панель</h1>
+  <p class="login-lead" id="lead" hidden>Панель управляет сервером, поэтому вход только по паролю. Придумайте его: не короче 8 символов. Он нужен раз в 30 дней на каждом устройстве.</p>
   <form class="login-form glass" id="form" novalidate>
-    <label for="password">Пароль</label>
+    <label for="password" id="pw-label">Пароль</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+    <label for="password2" id="pw2-label" hidden>Ещё раз</label>
+    <input id="password2" name="password2" type="password" autocomplete="new-password" hidden>
     <p class="login-error" id="error" role="alert"></p>
-    <button class="pbtn white" type="submit">Войти</button>
+    <button class="pbtn white" type="submit" id="submit">Войти</button>
   </form>
-  <p class="login-hint">Пароль задан в файле <code>.env</code> на сервере (PRICHAL_PASSWORD).</p>
+  <p class="login-hint" id="hint">Забыли пароль? На сервере выполните <code>docker exec prichal /prichal reset-password</code> и <code>docker restart prichal</code>, потом придумайте новый. Если пароль задан в <code>.env</code> (PRICHAL_PASSWORD), он там.</p>
 </main>
 <script src="login.js"></script>
 </body>

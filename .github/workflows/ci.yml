@@ -17,9 +17,11 @@ jobs:
       - name: gofmt
         run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
       - run: go vet ./...
-      - run: go test ./...
-      - name: shell scripts
-        run: sh -n install.sh && sh -n clients/prichal-tunnel.sh
+      - run: go test -race ./...
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+      - name: shellcheck
+        run: shellcheck -S warning install.sh clients/prichal-tunnel.sh scripts/*.sh
 
   image:
     needs: test

@@ -435,6 +435,7 @@ body.is-offline .view { opacity: .5; }
 .login-error { color: var(--bad); font-size: 14px; padding-left: 8px; min-height: 1em; }
 .login-error:empty { display: none; }
 .login-hint { color: var(--ink-3); font-size: 13px; padding-left: 8px; }
+.login-lead { color: var(--ink-2); font-size: 15px; line-height: 1.5; margin-top: -12px; }
 .login-hint code { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
 
 /* ---------- Узкие экраны ---------- */

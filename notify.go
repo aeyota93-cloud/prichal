@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	_ "time/tzdata" // the image has no zoneinfo of its own
 )
 
 // Notifier watches Docker events and the host and reports problems to
@@ -22,7 +23,25 @@ import (
 // stop / the panel do) are not reported. Without Telegram it still fills the
 // timeline.
 
-var msk = time.FixedZone("МСК", 3*3600)
+// zone is the time zone of the messages and of the weekly digest: TZ from
+// .env, Moscow by default. zoneName is how the messages write it.
+var zone, zoneName = loadZone(os.Getenv("TZ"))
+
+func loadZone(name string) (*time.Location, string) {
+	if name == "" || name == "Europe/Moscow" {
+		if loc, err := time.LoadLocation("Europe/Moscow"); err == nil {
+			return loc, "МСК"
+		}
+		return time.FixedZone("МСК", 3*3600), "МСК"
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		log.Printf("TZ=%q: %v, беру московское время", name, err)
+		return time.FixedZone("МСК", 3*3600), "МСК"
+	}
+	abbr, _ := time.Now().In(loc).Zone()
+	return loc, abbr
+}
 
 const (
 	manualWindow   = 30 * time.Second // kill -> die within this = stopped on purpose
@@ -243,6 +262,28 @@ func (n *Notifier) confirmRecovery(ctx context.Context, id, name, title string) 
 	}
 }
 
+// forget drops what no longer matters, so the maps do not grow forever
+// with IDs of containers that are long gone.
+func (n *Notifier) forget(now time.Time) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for k, t := range n.sent {
+		if now.Sub(t) >= quietSameEvent {
+			delete(n.sent, k)
+		}
+	}
+	for id, t := range n.lastKill {
+		if now.Sub(t) >= manualWindow {
+			delete(n.lastKill, id)
+		}
+	}
+	for id, ts := range n.crashes {
+		if len(ts) == 0 || now.Sub(ts[len(ts)-1]) >= loopWindow {
+			delete(n.crashes, id)
+		}
+	}
+}
+
 // ---------- Server ----------
 
 func readUptime() float64 {
@@ -298,8 +339,8 @@ func (n *Notifier) bootCheck(ctx context.Context) {
 		case <-time.After(wait):
 		}
 	}
-	bootAt := time.Now().Add(-time.Duration(readUptime()) * time.Second).In(msk)
-	msg := fmt.Sprintf("🔄 Сервер перезагрузился в %s МСК.", bootAt.Format("15:04"))
+	bootAt := time.Now().Add(-time.Duration(readUptime()) * time.Second).In(zone)
+	msg := fmt.Sprintf("🔄 Сервер перезагрузился в %s %s.", bootAt.Format("15:04"), zoneName)
 	short := "Сервер перезагрузился"
 	if prev != "" && prev != kernel {
 		short += ", новое ядро " + kernel
@@ -320,6 +361,7 @@ func (n *Notifier) hostLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		n.forget(time.Now())
 		if total, used := diskUsage(n.hostRoot); total > 0 {
 			pct := float64(used) / float64(total) * 100
 			switch {
@@ -350,12 +392,12 @@ func (n *Notifier) hostLoop(ctx context.Context) {
 	}
 }
 
-// ---------- Weekly updates digest (Sundays, 12:00 MSK) ----------
+// ---------- Weekly updates digest (Sundays, 12:00 local time) ----------
 
-// lastDigestSlot is the most recent Sunday 12:00 MSK not later than now.
+// lastDigestSlot is the most recent Sunday 12:00 (in zone) not later than now.
 func lastDigestSlot(now time.Time) time.Time {
-	m := now.In(msk)
-	slot := time.Date(m.Year(), m.Month(), m.Day(), 12, 0, 0, 0, msk).AddDate(0, 0, -int(m.Weekday()))
+	m := now.In(zone)
+	slot := time.Date(m.Year(), m.Month(), m.Day(), 12, 0, 0, 0, zone).AddDate(0, 0, -int(m.Weekday()))
 	if slot.After(m) {
 		slot = slot.AddDate(0, 0, -7)
 	}

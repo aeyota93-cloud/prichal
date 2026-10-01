@@ -66,13 +66,5 @@ func (l *Labels) Set(container, name, label string) error {
 	if l.path == "" {
 		return nil
 	}
-	b, err := json.MarshalIndent(l.m, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := l.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, l.path)
+	return writeJSONAtomic(l.path, l.m)
 }

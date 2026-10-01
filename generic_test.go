@@ -82,7 +82,7 @@ func TestLockReason(t *testing.T) {
 }
 
 func TestGuardAndLogin(t *testing.T) {
-	s := &server{hosts: map[string]bool{}, auth: NewAuth("secret")}
+	s := &server{hosts: map[string]bool{}, auth: NewAuth("secret", "", nil)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/overview", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("data")) })
 	mux.HandleFunc("POST /api/login", s.auth.login)

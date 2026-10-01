@@ -21,7 +21,11 @@ import (
 // fixed commands in updates.go go through here.
 
 const (
-	helperImage  = "alpine:latest"
+	// The helper runs privileged in the host's namespaces, so it is pinned by
+	// digest: a replaced tag on Docker Hub cannot slip in other code. To move
+	// to a newer Alpine, put the digest of its multi-arch index here.
+	helperImage  = "alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"
+	helperName   = "alpine 3.24" // how the Images page names it
 	helperPrefix = "prichal-host-"
 )
 
@@ -33,7 +37,7 @@ func (d *Docker) ensureImage(ctx context.Context, ref string) error {
 		resp.Body.Close()
 		return nil
 	}
-	repo, tag, _ := strings.Cut(ref, ":")
+	repo, tag := splitRef(ref)
 	resp, err = d.do(ctx, http.MethodPost, "/images/create", url.Values{"fromImage": {repo}, "tag": {tag}})
 	if err != nil {
 		return err
@@ -41,6 +45,19 @@ func (d *Docker) ensureImage(ctx context.Context, ref string) error {
 	defer resp.Body.Close()
 	_, err = io.Copy(io.Discard, resp.Body) // the pull finishes when the stream ends
 	return err
+}
+
+// splitRef splits an image reference into what /images/create wants as
+// fromImage and tag: "alpine:3.24" or "alpine@sha256:…" (the digest goes in
+// place of the tag).
+func splitRef(ref string) (repo, tag string) {
+	if repo, digest, ok := strings.Cut(ref, "@"); ok {
+		return repo, digest
+	}
+	if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
+		return ref[:i], ref[i+1:]
+	}
+	return ref, "latest"
 }
 
 func helperBody(cmd []string) map[string]any {
