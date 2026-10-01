@@ -438,8 +438,20 @@ body.is-offline .view { opacity: .5; }
 .login-lead { color: var(--ink-2); font-size: 15px; line-height: 1.5; margin-top: -12px; }
 .login-hint code { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
 
+/* ---------- Широкий экран ---------- */
+/* Лента событий прижата к правому краю, как меню к левому, а содержимое
+   стоит по центру между ними. */
+@media (min-width: 1400px) {
+  .ov { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .app:has(#view-overview:not([hidden])) { padding-right: 250px; }
+  .app:has(#view-overview:not([hidden])) .main { padding-left: 36px; padding-right: 36px; }
+  .rail { position: fixed; top: 0; right: 0; bottom: 0; width: 250px; margin: 0; align-self: stretch; padding: 34px 30px 26px 28px; overflow-y: auto; scrollbar-width: none; }
+  .rail::before { left: 1px; }
+  .rail::after { left: 0; top: 30px; }
+}
+
 /* ---------- Узкие экраны ---------- */
-@media (max-width: 1320px) {
+@media (max-width: 1399px) {
   .ov { grid-template-columns: minmax(0, 1fr); gap: 0; }
   .rail { margin-top: 46px; margin-left: 4px; }
 }

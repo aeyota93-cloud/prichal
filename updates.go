@@ -326,6 +326,18 @@ ls -1t %[1]s/*.log | tail -n +21 | sed 's/\.log$//' | while read -r f; do rm -f 
 		dir, script, id)
 }
 
+// systemdRunCmd starts the wrapper as a transient unit. systemd treats "$"
+// in the command line as its own variables ("$$" became "$", "${X}" would be
+// replaced), so every "$" is doubled to reach sh unchanged.
+func systemdRunCmd(id, title, wrapper string, args []string) []string {
+	esc := func(s string) string { return strings.ReplaceAll(s, "$", "$$") }
+	cmd := []string{"systemd-run", "--unit=prichal-" + id, "--description=Причал: " + title, "--", "/bin/sh", "-c", esc(wrapper), "prichal"}
+	for _, a := range args {
+		cmd = append(cmd, esc(a))
+	}
+	return cmd
+}
+
 // Start runs a task on the host. Only one task runs at a time: the check
 // and the start happen under startMu, so two quick clicks cannot both pass.
 func (u *Updates) Start(ctx context.Context, kind, title string, args []string) (*Task, error) {
@@ -351,9 +363,7 @@ func (u *Updates) Start(ctx context.Context, kind, title string, args []string) 
 	var cmd []string
 	runner := "systemd"
 	if sys.Init == "systemd" {
-		cmd = []string{"systemd-run", "--unit=prichal-" + id, "--description=Причал: " + title, "--", "/bin/sh", "-c", wrapper, "prichal"}
-		cmd = append(cmd, args...)
-		out, code, err := u.docker.HostRun(ctx, cmd...)
+		out, code, err := u.docker.HostRun(ctx, systemdRunCmd(id, title, wrapper, args)...)
 		if err != nil {
 			return nil, err
 		}

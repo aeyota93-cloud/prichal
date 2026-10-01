@@ -50,6 +50,7 @@ const fakeDockerScript = `#!/bin/sh
 case "$1" in
 compose) for a in "$@"; do [ "$a" = ps ] && echo cid1; done ;;
 inspect) echo "$INSPECT" ;;
+run) [ -z "$FAIL_RUN" ] || exit 125 ;;
 esac
 exit 0
 `
@@ -165,5 +166,36 @@ func TestTaskWrapper(t *testing.T) {
 	// set -e: the first failing command ends the task with its code.
 	if log, exit := run("bad-1", "echo one\nfalse\necho two"); exit == "0" || strings.Contains(log, "two") {
 		t.Errorf("bad: exit %q log %q", exit, log)
+	}
+}
+
+// A failed backup must bring the old container back, not recreate it from
+// the freshly pulled image (that would be an update without a backup).
+func TestAppUpdateScriptBackupFails(t *testing.T) {
+	wd := t.TempDir()
+	out, log, ok := runScript(t, appUpdateScript, []string{"PRICHAL_BACKUPS=" + filepath.Join(t.TempDir(), "b"), "FAIL_RUN=1"},
+		"proj", "web", wd, filepath.Join(wd, "compose.yaml"), "1", helperImage, "proj_data")
+	if ok || !strings.Contains(out, "Запускаю web обратно") {
+		t.Fatalf("failure expected:\n%s\n%s", out, log)
+	}
+	if !strings.Contains(log, "[start] [web]") || strings.Contains(log, "[up]") {
+		t.Errorf("the old container must start, nothing recreated:\n%s", log)
+	}
+}
+
+// systemd replaces "$$" with "$" and expands "${X}" in the command line;
+// doubling every "$" gives sh exactly what the task script says.
+func TestSystemdRunEscapes(t *testing.T) {
+	wrapper := taskWrapper(taskDir, "app-1", appUpdateScript)
+	cmd := systemdRunCmd("app-1", "обновление n8n", wrapper, []string{"proj", "/srv/$weird dir"})
+	unescape := func(s string) string { return strings.ReplaceAll(s, "$$", "$") }
+	if got := unescape(cmd[6]); got != wrapper {
+		t.Errorf("wrapper changed on the way through systemd")
+	}
+	if !strings.Contains(cmd[6], `prichal-host-backup-$$$$`) {
+		t.Errorf("$$ must reach systemd as $$$$")
+	}
+	if cmd[5] != "-c" || cmd[7] != "prichal" || unescape(cmd[9]) != "/srv/$weird dir" {
+		t.Errorf("command: %q", cmd)
 	}
 }

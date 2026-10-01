@@ -8,7 +8,9 @@ cd "$wd" || exit 1
 echo "== Скачиваю новую версию ($svc)"
 dc pull "$svc"
 ok=0
-trap '[ "$ok" = 1 ] || { echo "!! Ошибка. Запускаю $svc обратно"; dc up -d "$svc"; }' EXIT
+# On failure the old container starts again as it was: "up" would recreate it
+# from the image just pulled, i.e. update without the backup.
+trap '[ "$ok" = 1 ] || { echo "!! Ошибка. Запускаю $svc обратно"; dc start "$svc" || dc up -d "$svc"; }' EXIT
 if [ "$backup" = 1 ] && [ $# -gt 0 ]; then
   echo "== Останавливаю $svc, чтобы сделать копию данных"
   dc stop "$svc"
