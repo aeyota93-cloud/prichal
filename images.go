@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"sort"
@@ -65,6 +66,15 @@ func (s *server) imageViews(ctx context.Context) ([]imageView, int64, error) {
 	return out, cache, nil
 }
 
+// name is how the timeline calls an image: its first tag, else a short ID.
+func (im imageView) name() string {
+	if len(im.Tags) > 0 {
+		return im.Tags[0]
+	}
+	id := strings.TrimPrefix(im.ID, "sha256:")
+	return id[:min(12, len(id))]
+}
+
 func isHelperImage(im ImageSummary) bool {
 	for _, d := range im.RepoDigests {
 		if strings.TrimPrefix(strings.TrimPrefix(d, "docker.io/"), "library/") == helperImage {
@@ -104,6 +114,7 @@ func (s *server) removeImage(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("remove image %s %v", id, im.Tags)
 		if err := s.docker.RemoveImage(ctx, id, im.Tags); err != nil {
+			s.journal.Add("bad", "Не получилось удалить образ "+im.name()+": "+shortErr(err))
 			writeErr(w, err)
 			return
 		}
@@ -127,18 +138,28 @@ func (s *server) prune(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	before, errBefore := s.docker.DiskUsage(ctx)
+	var failed int
+	var firstErr error
 	for _, im := range imgs {
 		if len(im.UsedBy) > 0 {
 			continue
 		}
 		if err := s.docker.RemoveImage(ctx, im.ID, im.Tags); err != nil {
 			log.Printf("prune: image %s %v: %v", im.ID, im.Tags, err)
+			if failed++; firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
 	n, err := s.docker.PruneBuildCache(ctx)
 	if err != nil {
+		s.journal.Add("bad", "Очистка не удалась: "+shortErr(err))
 		writeErr(w, err)
 		return
+	}
+	if failed > 0 {
+		s.journal.Add("bad", fmt.Sprintf("Очистка удалила не всё: не получилось удалить %d %s: %s",
+			failed, plural(failed, "образ", "образа", "образов"), shortErr(firstErr)))
 	}
 	// Docker's own count includes cache entries shared with image layers,
 	// which stay on disk. What the page promised is measured instead.

@@ -84,12 +84,13 @@
 
           <div class="sec"><h2>Уведомления</h2></div>
           <div id="tg-row"></div>
-          <div class="tags" id="tg-tags"></div>
+          <p class="tg-why" id="tg-why" hidden></p>
         </div>
 
         <aside class="rail" aria-label="Что происходило">
-          <p class="rail-title">сейчас</p>
+          <p class="rail-title">Что происходило</p>
           <div id="events"></div>
+          <button class="textbtn ev-more" id="ev-more" hidden aria-expanded="false"></button>
         </aside>
       </div>
     </section>
@@ -115,6 +116,7 @@
         <div class="chip-row"><span class="chip glass"><span class="live"></span><span id="cn-sum">Загружаю…</span></span></div>
         <h1 id="cn-title">Подключения</h1>
         <p class="sub">Кто сейчас пользуется VPN и прокси на этом сервере.</p>
+        <p class="sub-more">Добавлять и удалять клиентов можно в приложении Amnezia. Здесь можно только подписать их для себя.</p>
       </div>
       <div class="seg glass" role="group" aria-label="Сервис" id="cn-seg"></div>
       <div id="cn-list"></div>

@@ -8,98 +8,73 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
 // Telegram sends notifications to one person. The chat is bound the first
-// time that person (TG_USERNAME) presses Start in the bot; everyone else is
-// ignored. The token never appears in logs.
+// time that person (the configured username) presses Start in the bot;
+// everyone else is ignored. The token never appears in logs. The bot itself
+// is started and replaced by TgHub; what must outlive it (bound chat, last
+// seen kernel, last digest) lives in tgStore.
 type Telegram struct {
 	token    string
 	username string // without @, lower case
-	path     string // state file (bound chat, last seen kernel)
+	api      string // Bot API address; empty: the real one (tests point it elsewhere)
+	store    *tgStore
 	http     *http.Client
 
-	mu    sync.Mutex
-	state tgState
 	queue chan string
 }
 
-type tgState struct {
-	ChatID     int64  `json:"chatId"`
-	Kernel     string `json:"kernel,omitempty"`
-	LastDigest int64  `json:"lastDigest,omitempty"`
-}
+const telegramAPI = "https://api.telegram.org"
 
-// DigestDue reports whether the weekly digest for the period starting at
-// `since` has not been sent yet, and marks it as sent.
-func (t *Telegram) DigestDue(since time.Time) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.state.LastDigest >= since.Unix() {
-		return false
+func newTelegram(token, username, api string, store *tgStore) *Telegram {
+	if api == "" {
+		api = telegramAPI
 	}
-	t.state.LastDigest = time.Now().Unix()
-	t.saveLocked()
-	return true
-}
-
-func NewTelegram(token, username, dataDir string) *Telegram {
-	if token == "" || username == "" {
-		return nil
-	}
-	t := &Telegram{
+	return &Telegram{
 		token:    token,
 		username: strings.ToLower(strings.TrimPrefix(username, "@")),
+		api:      api,
+		store:    store,
 		http:     &http.Client{Timeout: 70 * time.Second},
 		queue:    make(chan string, 64),
 	}
-	if dataDir != "" {
-		t.path = filepath.Join(dataDir, "telegram.json")
-		if b, err := os.ReadFile(t.path); err == nil {
-			_ = json.Unmarshal(b, &t.state)
-		}
-	}
-	return t
 }
 
-func (t *Telegram) saveLocked() {
-	if t.path == "" {
-		return
-	}
-	_ = writeJSONAtomic(t.path, t.state)
-}
-
-func (t *Telegram) chat() int64 {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.state.ChatID
-}
-
-// SwapKernel stores the running kernel version and returns the previous one.
-func (t *Telegram) SwapKernel(k string) string {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	prev := t.state.Kernel
-	if prev != k {
-		t.state.Kernel = k
-		t.saveLocked()
-	}
-	return prev
-}
+func (t *Telegram) chat() int64 { return t.store.chat() }
 
 // redact keeps the bot token out of error messages (net/http puts the URL,
 // token included, into its errors).
 func (t *Telegram) redact(err error) string {
+	if t.token == "" {
+		return err.Error() // ReplaceAll with "" would insert text between every character
+	}
 	return strings.ReplaceAll(err.Error(), t.token, "<token>")
 }
 
+// tgError is an answer of the Bot API that says no. Status is Telegram's own
+// error code (401 for a wrong token, 404 for a malformed one).
+type tgError struct {
+	Method string
+	Status int
+	Desc   string
+}
+
+func (e *tgError) Error() string {
+	if e.Desc == "" {
+		return fmt.Sprintf("telegram %s: %d", e.Method, e.Status)
+	}
+	return fmt.Sprintf("telegram %s: %s", e.Method, e.Desc)
+}
+
 func (t *Telegram) call(ctx context.Context, method string, params url.Values, out any) error {
-	u := "https://api.telegram.org/bot" + t.token + "/" + method
+	api := t.api
+	if api == "" {
+		api = telegramAPI
+	}
+	u := api + "/bot" + t.token + "/" + method
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, strings.NewReader(params.Encode()))
 	if err != nil {
 		return errors.New(t.redact(err))
@@ -112,14 +87,19 @@ func (t *Telegram) call(ctx context.Context, method string, params url.Values, o
 	defer resp.Body.Close()
 	var r struct {
 		OK          bool            `json:"ok"`
+		ErrorCode   int             `json:"error_code"`
 		Description string          `json:"description"`
 		Result      json.RawMessage `json:"result"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-		return fmt.Errorf("telegram %s: %d", method, resp.StatusCode)
+		return &tgError{Method: method, Status: resp.StatusCode}
 	}
 	if !r.OK {
-		return fmt.Errorf("telegram %s: %s", method, r.Description)
+		code := r.ErrorCode
+		if code == 0 {
+			code = resp.StatusCode
+		}
+		return &tgError{Method: method, Status: code, Desc: r.Description}
 	}
 	if out != nil {
 		return json.Unmarshal(r.Result, out)
@@ -140,6 +120,28 @@ func (t *Telegram) Send(text string) {
 	}
 }
 
+// sendNow delivers text to the bound chat right away, bypassing the queue.
+func (t *Telegram) sendNow(ctx context.Context, text string) error {
+	return t.call(ctx, "sendMessage", url.Values{
+		"chat_id":                  {fmt.Sprint(t.chat())},
+		"text":                     {text},
+		"parse_mode":               {"HTML"},
+		"disable_web_page_preview": {"true"},
+	}, nil)
+}
+
+// getMe returns the bot's own username; it is also the cheapest way to learn
+// whether a token works.
+func (t *Telegram) getMe(ctx context.Context) (string, error) {
+	var me struct {
+		Username string `json:"username"`
+	}
+	if err := t.call(ctx, "getMe", nil, &me); err != nil {
+		return "", err
+	}
+	return me.Username, nil
+}
+
 func (t *Telegram) Run(ctx context.Context, onBound func()) {
 	go t.bind(ctx, onBound)
 	for {
@@ -148,14 +150,8 @@ func (t *Telegram) Run(ctx context.Context, onBound func()) {
 			return
 		case text := <-t.queue:
 			for {
-				id := t.chat()
-				if id != 0 {
-					err := t.call(ctx, "sendMessage", url.Values{
-						"chat_id":                  {fmt.Sprint(id)},
-						"text":                     {text},
-						"parse_mode":               {"HTML"},
-						"disable_web_page_preview": {"true"},
-					}, nil)
+				if t.chat() != 0 {
+					err := t.sendNow(ctx, text)
 					if err == nil {
 						break
 					}
@@ -197,8 +193,15 @@ func (t *Telegram) bind(ctx context.Context, onBound func()) {
 			"allowed_updates": {`["message"]`},
 		}, &updates)
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			log.Printf("telegram: %v", err)
-			time.Sleep(15 * time.Second)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(15 * time.Second):
+			}
 			continue
 		}
 		for _, u := range updates {
@@ -207,10 +210,9 @@ func (t *Telegram) bind(ctx context.Context, onBound func()) {
 			if m == nil || m.Chat.Type != "private" || strings.ToLower(m.From.Username) != t.username {
 				continue
 			}
-			t.mu.Lock()
-			t.state.ChatID = m.Chat.ID
-			t.saveLocked()
-			t.mu.Unlock()
+			if !t.store.bind(ctx, m.Chat.ID) {
+				return // this bot was replaced meanwhile
+			}
 			// Confirm the offset so Telegram forgets the handled updates.
 			_ = t.call(ctx, "getUpdates", url.Values{"offset": {fmt.Sprint(offset)}, "timeout": {"0"}}, nil)
 			log.Printf("telegram: bound to @%s", t.username)

@@ -295,7 +295,11 @@ function renderTaskBox() {
   const wrap = t.state === 'running'
     ? h('div', { class: 'task glass is-busy' }, h('div', { class: 'task-head' }, head), pre)
     : h('details', { class: 'task glass', open: wasOpen || null }, h('summary', { class: 'task-head' }, head, h('span', { class: 'ct-caret' }, icon('caret-down'))), pre);
-  box.replaceChildren(wrap);
+  // Установка закончилась, а серверу нужна перезагрузка: предлагаем её сразу под задачей.
+  const need = t.state === 'done' && upd.view?.system?.rebootRequired;
+  box.replaceChildren(wrap, need ? h('div', { class: 'task-reboot glass' },
+    h('p', { text: 'Чтобы обновления заработали, серверу нужна перезагрузка' }),
+    h('button', { class: 'pbtn white sm', id: 'task-reboot-btn', disabled: taskRunning(), onclick: askReboot }, icon('power'), 'Перезагрузить сейчас')) : '');
   if (keepBottom) pre.scrollTop = pre.scrollHeight;
 }
 

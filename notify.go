@@ -53,7 +53,7 @@ const (
 
 type Notifier struct {
 	docker   *Docker
-	tg       *Telegram
+	tg       *TgHub
 	hostRoot string
 	upd      *Updates
 	journal  *Journal
@@ -65,7 +65,7 @@ type Notifier struct {
 	sent     map[string]time.Time   // dedupe key -> when
 }
 
-func NewNotifier(d *Docker, tg *Telegram, hostRoot string, upd *Updates, journal *Journal) *Notifier {
+func NewNotifier(d *Docker, tg *TgHub, hostRoot string, upd *Updates, journal *Journal) *Notifier {
 	return &Notifier{
 		docker: d, tg: tg, hostRoot: hostRoot, upd: upd, journal: journal,
 		lastKill: map[string]time.Time{}, crashes: map[string][]time.Time{},
@@ -89,9 +89,7 @@ func (n *Notifier) send(key, text string) bool {
 	n.sent[key] = time.Now()
 	n.mu.Unlock()
 	log.Printf("notify: %s", key)
-	if n.tg != nil {
-		n.tg.Send(text)
-	}
+	n.tg.Send(text)
 	return true
 }
 
@@ -103,13 +101,11 @@ func (n *Notifier) report(key, tone, short, text string) {
 }
 
 func (n *Notifier) Run(ctx context.Context) {
-	if n.tg != nil {
-		go n.tg.Run(ctx, func() { n.welcome(ctx) })
-	}
+	n.tg.Start(ctx, func() { n.welcome(ctx) })
 	go n.bootCheck(ctx)
 	go n.hostLoop(ctx)
-	if n.upd != nil && n.tg != nil {
-		go n.digestLoop(ctx)
+	if n.upd != nil {
+		go n.digestLoop(ctx) // sends only while the bot is on
 	}
 	n.eventsLoop(ctx)
 }
@@ -322,10 +318,7 @@ func (n *Notifier) containerSummary(ctx context.Context) string {
 
 func (n *Notifier) bootCheck(ctx context.Context) {
 	kernel := readKernel()
-	prev := ""
-	if n.tg != nil {
-		prev = n.tg.SwapKernel(kernel)
-	}
+	prev := n.tg.SwapKernel(kernel)
 	up := readUptime()
 	if up < 0 || up > 15*60 {
 		return // the panel restarted, not the server

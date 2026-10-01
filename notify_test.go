@@ -10,7 +10,8 @@ import (
 
 func testNotifier() (*Notifier, *Telegram) {
 	tg := &Telegram{token: "123:SECRET", queue: make(chan string, 16)}
-	return NewNotifier(nil, tg, "/", nil, &Journal{}), tg
+	hub := &TgHub{store: &tgStore{}, bot: tg}
+	return NewNotifier(nil, hub, "/", nil, &Journal{}), tg
 }
 
 func ev(action, id, name string, attrs ...string) dockerEvent {

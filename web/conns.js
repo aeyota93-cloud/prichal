@@ -38,8 +38,8 @@ export function connBadge(name) {
 }
 
 const CONN_NOTES = {
-  wg: '«На связи» значит, что устройство обменивалось данными с сервером в последние 3 минуты. Трафик считается с последнего перезапуска контейнера.',
-  openvpn: 'OpenVPN обновляет список раз в минуту. Трафик показан за текущее подключение.',
+  wg: '«На связи» значит, что устройство обменивалось данными с сервером в последние 3 минуты. Трафик считается с последнего перезапуска контейнера. Подпись привязана к имени клиента в Amnezia: если переименовать его там, подпись пропадёт.',
+  openvpn: 'OpenVPN обновляет список раз в минуту. Трафик показан за текущее подключение. Подпись привязана к имени клиента в Amnezia: если переименовать его там, подпись пропадёт.',
   telemt: 'Одной ссылкой могут пользоваться несколько человек. Устройства считаются по разным IP-адресам; один Telegram обычно держит несколько соединений.',
 };
 
@@ -49,32 +49,34 @@ function bytesCell(iconName, value, title) {
 
 let editing = null; // пока открыта подпись, списки не перерисовываем, чтобы не сбить ввод
 
+// Подпись выходит на первое место, а настоящее имя уходит под неё.
 function connTitle(s, c) {
-  if (s.kind !== 'telemt') return { main: c.name, sub: '' };
+  if (s.kind !== 'telemt') return c.label ? { main: c.label, sub: c.name } : { main: c.name, sub: '' };
   return c.label ? { main: c.label, sub: linkName(c.name) } : { main: linkName(c.name), sub: '' };
 }
+
+// Как назвать подписываемое в сообщениях: у прокси это ссылка, у VPN клиент.
+const labelSubject = (s, c) => s.kind === 'telemt' ? `${linkName(c.name)} подписана` : `Клиент «${c.name}» подписан`;
 
 // Имя, карандаш сразу за ним, под именем — какая это ссылка.
 function nameCell(s, c) {
   const t = connTitle(s, c);
   const cell = h('div', { class: 'cl-name-cell' });
   const name = h('p', { class: 'cl-name' }, h('span', { title: t.main, text: t.main }));
-  if (s.kind === 'telemt') {
-    name.append(h('button', { class: 'cl-edit', title: 'Подписать', 'aria-label': `Подписать: ${t.main}`, onclick: () => editLabel(cell, s, c) }, icon('pencil-simple')));
-  }
+  name.append(h('button', { class: 'cl-edit', title: 'Подписать', 'aria-label': `Подписать: ${t.main}`, onclick: () => editLabel(cell, s, c) }, icon('pencil-simple')));
   cell.append(name, t.sub ? h('p', { class: 'cl-sub', text: t.sub }) : '');
   return cell;
 }
 
 function editLabel(cell, s, c) {
   editing = { container: s.container, name: c.name };
-  const input = h('input', { class: 'cl-input', type: 'text', maxlength: '40', value: c.label || '', placeholder: 'Например, Мама', 'aria-label': `Подпись для «${linkName(c.name)}»` });
+  const input = h('input', { class: 'cl-input', type: 'text', maxlength: '40', value: c.label || '', placeholder: s.kind === 'telemt' ? 'Например, Мама' : 'Например, Телефон мамы', 'aria-label': `Подпись для «${s.kind === 'telemt' ? linkName(c.name) : c.name}»` });
   const cancel = () => { editing = null; renderAllConns(); };
   const save = async () => {
     try {
       await api('/api/labels', { method: 'POST', body: { container: s.container, name: c.name, label: input.value } });
       const v = input.value.trim();
-      toast(v ? `${linkName(c.name)} подписана: ${v}` : `Подпись у «${linkName(c.name)}» убрана`);
+      toast(v ? `${labelSubject(s, c)}: ${v}` : `Подпись у «${s.kind === 'telemt' ? linkName(c.name) : c.name}» убрана`);
       editing = null;
       await loadConns();
     } catch (e) {

@@ -13,31 +13,10 @@ command -v docker >/dev/null 2>&1 || fail "Нужен Docker: https://docs.docke
 docker compose version >/dev/null 2>&1 || fail "Нужен Docker Compose v2 (плагин docker compose)."
 docker info >/dev/null 2>&1 || fail "Docker не отвечает. Он запущен?"
 
-# set_env KEY VALUE: записать значение в .env, ничего не экранируя руками.
-set_env() {
-  tmp=$(mktemp)
-  awk -v k="$1" -v v="$2" 'BEGIN { done = 0 }
-    $0 ~ "^" k "=" { print k "=" v; done = 1; next } { print }
-    END { if (!done) print k "=" v }' .env > "$tmp"
-  cat "$tmp" > .env
-  rm -f "$tmp"
-}
-
 if [ ! -f .env ]; then
   cp .env.example .env
   chmod 600 .env
   say "Создан файл настроек .env."
-  if [ -t 0 ]; then
-    printf 'Токен Telegram-бота для уведомлений (Enter, чтобы пропустить): '
-    read -r tok || tok=""
-    if [ -n "$tok" ]; then
-      printf 'Ваш @username в Telegram: '
-      read -r user || user=""
-      set_env TG_TOKEN "$tok"
-      set_env TG_USERNAME "${user#@}"
-      say "Откройте своего бота в Telegram и нажмите Start: он начнёт писать вам."
-    fi
-  fi
 fi
 chmod 600 .env
 
@@ -78,4 +57,5 @@ say "и зайдите в браузере на http://localhost:$port"
 if ! grep -q '^PRICHAL_PASSWORD=..*' .env; then
   say "При первом входе панель попросит придумать пароль."
 fi
+say "Уведомления в Telegram подключаются в самой панели: Обзор → Уведомления → Подключить."
 say "Готовые ярлыки для Windows, macOS и Linux лежат в папке clients/."

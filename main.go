@@ -28,7 +28,7 @@ type server struct {
 	upd     *Updates
 	auth    *Auth
 	journal *Journal
-	tgUser  string          // Telegram user the alerts go to; empty: alerts are off
+	tg      *TgHub          // Telegram alerts, switched from the panel
 	hosts   map[string]bool // extra hostnames allowed besides localhost
 	locked  string          // non-empty: reachable from outside without a password; why
 }
@@ -119,13 +119,11 @@ func main() {
 		log.Printf("пароль ещё не задан: откройте панель через SSH-туннель и придумайте его")
 	}
 
-	tg := NewTelegram(os.Getenv("TG_TOKEN"), os.Getenv("TG_USERNAME"), dataDir)
-	if tg != nil {
-		s.tgUser = tg.username
-	} else {
-		log.Printf("Telegram не настроен (нет TG_TOKEN/TG_USERNAME), уведомления выключены")
+	s.tg = NewTgHub(dataDir, os.Getenv("TG_TOKEN"), os.Getenv("TG_USERNAME"))
+	if s.tg.Status().State == "off" {
+		log.Printf("Telegram не настроен, уведомления выключены (подключить: Обзор → Уведомления)")
 	}
-	go NewNotifier(d, tg, hostRoot, s.upd, s.journal).Run(context.Background())
+	go NewNotifier(d, s.tg, hostRoot, s.upd, s.journal).Run(context.Background())
 
 	static, _ := fs.Sub(webFS, "web")
 	mux := http.NewServeMux()
@@ -147,6 +145,10 @@ func main() {
 	mux.HandleFunc("POST /api/updates/app", s.updatesApp)
 	mux.HandleFunc("POST /api/updates/git", s.updatesGit)
 	mux.HandleFunc("POST /api/updates/reboot", s.updatesReboot)
+	mux.HandleFunc("GET /api/telegram", s.telegramStatus)
+	mux.HandleFunc("POST /api/telegram", s.telegramSave)
+	mux.HandleFunc("POST /api/telegram/test", s.telegramTest)
+	mux.HandleFunc("POST /api/telegram/off", s.telegramOff)
 	mux.HandleFunc("GET /api/images", s.images)
 	mux.HandleFunc("POST /api/images/{id}/remove", s.removeImage)
 	mux.HandleFunc("POST /api/prune", s.prune)

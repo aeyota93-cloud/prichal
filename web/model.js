@@ -75,7 +75,11 @@ export function confirmText(c, act) {
   }[a.kind] || '';
   const after = (act === 'stop' || act === 'kill') && c.restartPolicy === 'always'
     ? 'После перезагрузки сервера он запустится снова сам.' : '';
-  return [base, impact, after].filter(Boolean).join(' ');
+  // Остановили VPN или прокси, через которые сидите, и связь пропала: вернуть можно только по SSH.
+  // Контейнер на паузе возвращается командой unpause, start для него не работает.
+  const ssh = ['vpn', 'proxy'].includes(a.kind) && ['stop', 'kill', 'pause'].includes(act)
+    ? `Если связь пропадёт, запустите его снова по SSH: «docker ${act === 'pause' ? 'unpause' : 'start'} ${c.name}».` : '';
+  return [base, impact, after, ssh].filter(Boolean).join(' ');
 }
 
 export const isNet = c => ['vpn', 'proxy'].includes(about(c).kind);

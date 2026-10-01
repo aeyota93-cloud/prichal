@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -18,18 +20,41 @@ func (s *server) overview(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	tg := s.tg.Status()
+	tg.Source = "" // only the settings dialog needs to know where they came from
 	writeJSON(w, http.StatusOK, struct {
 		*Overview
-		Events   []Event `json:"events"`
-		Telegram string  `json:"telegram"` // who gets the alerts; empty: alerts are off
-		Zone     string  `json:"zone"`     // time zone of the weekly digest
-	}{ov, s.journal.List(), s.tgUser, zoneName})
+		Events   []Event  `json:"events"`
+		Telegram TgStatus `json:"telegram"` // alerts: state, who gets them, the bot
+		Zone     string   `json:"zone"`     // time zone of the weekly digest
+	}{ov, s.journal.List(), tg, zoneName})
 }
 
 // actionDone is how the timeline says what the panel did to a container.
 var actionDone = map[string]string{
 	"start": "запущен", "stop": "остановлен", "restart": "перезапущен",
 	"kill": "остановлен принудительно", "pause": "поставлен на паузу", "unpause": "снят с паузы",
+}
+
+// actionVerb is the same for an error line: "Не получилось <verb> <name>".
+var actionVerb = map[string]string{
+	"start": "запустить", "stop": "остановить", "restart": "перезапустить",
+	"kill": "остановить принудительно", "pause": "поставить на паузу", "unpause": "снять с паузы",
+}
+
+// shortErr is an error as one short line for the timeline: Docker's own
+// message if it has one, whitespace collapsed, cut to about 120 characters.
+func shortErr(err error) string {
+	msg := err.Error()
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Message != "" {
+		msg = ae.Message
+	}
+	msg = strings.Join(strings.Fields(msg), " ")
+	if r := []rune(msg); len(r) > 120 {
+		msg = string(r[:120]) + "…"
+	}
+	return msg
 }
 
 // findContainer accepts only IDs of containers that exist right now.
@@ -79,12 +104,14 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(300 * time.Millisecond)
 			if err := s.docker.Action(context.Background(), id, act); err != nil {
 				log.Printf("self restart failed: %v", err)
+				s.journal.Add("bad", "Не получилось "+actionVerb[act]+" "+title+": "+shortErr(err))
 			}
 		}()
 		return
 	}
 	if err := s.docker.Action(ctx, id, act); err != nil {
 		log.Printf("%s: %s failed: %v", c.Name(), act, err)
+		s.journal.Add("bad", "Не получилось "+actionVerb[act]+" "+title+": "+shortErr(err))
 		writeErr(w, err)
 		return
 	}

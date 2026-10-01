@@ -52,7 +52,7 @@ func TestNotifierFillsJournal(t *testing.T) {
 }
 
 func TestNotifierWithoutTelegram(t *testing.T) {
-	n := NewNotifier(nil, nil, "/", nil, &Journal{})
+	n := NewNotifier(nil, NewTgHub("", "", ""), "/", nil, &Journal{})
 	n.handle(context.Background(), ev("oom", "c3", "n8n-n8n-1", "image", "n8nio/n8n"))
 	if l := n.journal.List(); len(l) != 1 || l[0].Text != "n8n: не хватило памяти" {
 		t.Errorf("got %+v", l)

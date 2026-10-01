@@ -29,10 +29,25 @@ export function icon(name) {
 
 // ---------- Всплывающие сообщения и подтверждения ----------
 
+// Обычные сообщения гаснут сами. Ошибки висят, пока их не закроют (кнопкой
+// или Esc, когда фокус внутри); одновременно не больше трёх, старые уходят.
+const MAX_ERRORS = 3;
+
 export function toast(text, bad = false) {
-  const el = h('div', { class: 'toast' + (bad ? ' is-bad' : '') }, icon(bad ? 'warning-circle' : 'check-circle'), h('p', { text }));
-  $('#toasts').append(el);
-  setTimeout(() => el.remove(), bad ? 9000 : 4500);
+  const box = $('#toasts');
+  if (!bad) {
+    const el = h('div', { class: 'toast' }, icon('check-circle'), h('p', { text }));
+    box.append(el);
+    setTimeout(() => el.remove(), 4500);
+    return;
+  }
+  const close = () => el.remove();
+  const el = h('div', { class: 'toast is-bad', role: 'alert', onkeydown: e => { if (e.key === 'Escape') close(); } },
+    icon('warning-circle'), h('p', { text }),
+    h('button', { class: 'toast-x', 'aria-label': 'Закрыть', title: 'Закрыть', onclick: close }, icon('x')));
+  box.append(el);
+  const errs = box.querySelectorAll('.toast.is-bad');
+  for (let i = 0; i < errs.length - MAX_ERRORS; i++) errs[i].remove();
 }
 
 export function confirmBox({ q, text, yes, danger, onYes, onNo }) {

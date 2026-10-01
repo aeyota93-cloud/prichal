@@ -1,8 +1,9 @@
-import { $, h, pillRow } from './dom.js';
+import { $, h, icon, pillRow } from './dom.js';
 import { fmtBytes, fmtPct, fmtDur, fmtWhen, plural, cap } from './format.js';
 import { about, statusOf } from './model.js';
 import { openContainer } from './containers.js';
 import { conns, connCount, connBadge } from './conns.js';
+import { openTelegram } from './telegram.js';
 
 // ---------- Состояние сервера ----------
 
@@ -138,19 +139,31 @@ function renderTiles(list) {
     h('div', { class: 'tile-mem' }, ...(t.mem ? [h('span', { class: 'num', text: t.mem }), h('span', { text: 'памяти' })] : [])))));
 }
 
-const TG_REASONS = ['контейнер упал или перезапускается по кругу', 'сервер перезагрузился', 'диск заполнен на 85 %', 'свободной памяти меньше 8 %'];
+const TG_REASONS = ['контейнер упал или перезапускается по кругу', 'сервер перезагрузился', 'диск заполнен на 85 %', 'свободной памяти меньше 8 %'];
 
 let tgShown = null;
-function renderTelegram(user, zone) {
-  if (tgShown === `${user || ''} ${zone}`) return;
-  tgShown = `${user || ''} ${zone}`;
-  if (user) {
-    $('#tg-row').replaceChildren(pillRow('Telegram', h('span', { class: 'state' }, `@${user}`, h('span', { class: 'knob', 'aria-label': 'включены' }))));
-    $('#tg-tags').replaceChildren(...[...TG_REASONS, `сводка обновлений по воскресеньям в 12:00 ${zone}`].map(t => h('span', { class: 'tag', text: t })));
+function renderTelegram(tg, zone) {
+  // Сервер отдаёт объект; всё остальное считаем «выключено».
+  const st = tg && typeof tg === 'object' ? tg : { state: 'off' };
+  const key = [st.state, st.user, st.bot, zone].join('|');
+  if (tgShown === key) return;
+  tgShown = key;
+  const open = (label, cls) => h('button', { id: 'tg-open', class: `pbtn sm ${cls}`, onclick: () => openTelegram(st) }, label);
+  let end;
+  if (st.state === 'on') {
+    end = [h('span', { class: 'state plain tg-state' }, icon('check'), `@${st.user}`), open('Настроить', 'ghost')];
+  } else if (st.state === 'waiting') {
+    end = [h('span', { class: 'state plain tg-state' }, h('span', { class: 'sdot', 'data-tone': 'warn' }), `ждём Start от @${st.user}`), open('Настроить', 'ghost')];
   } else {
-    $('#tg-row').replaceChildren(pillRow('Telegram', h('span', { class: 'state' }, 'выключены', h('span', { class: 'knob off' }))));
-    $('#tg-tags').replaceChildren(h('p', { class: 'hint' }, 'Чтобы бот писал о сбоях, задайте ', h('code', { text: 'TG_TOKEN' }), ' и ', h('code', { text: 'TG_USERNAME' }), ' в файле .env на сервере.'));
+    end = [h('span', { class: 'state plain tg-state faint', text: 'выключены' }), open('Подключить', 'white')];
   }
+  // Кнопка в строке меняется вместе с состоянием: фокус не должен пропасть вместе со старой.
+  const hadFocus = $('#tg-row').contains(document.activeElement);
+  $('#tg-row').replaceChildren(pillRow('Telegram', end));
+  if (hadFocus) $('#tg-open').focus();
+  const why = $('#tg-why');
+  why.hidden = st.state === 'off';
+  why.textContent = st.state === 'off' ? '' : `Бот напишет, если: ${TG_REASONS.join(' · ')}. По воскресеньям в 12:00 ${zone} — сводка обновлений.`;
 }
 
 let eventsKey = '';
@@ -164,11 +177,31 @@ function renderEvents(events, hv) {
     }
   }
   list.sort((a, b) => b.t - a.t);
-  const key = JSON.stringify(list.slice(0, 6).map(e => [fmtWhen(e.t), e.text, e.tone]));
+  eventsList = list;
+  drawEvents();
+}
+
+// Сначала последние 6 событий, кнопка под лентой раскрывает все (сервер хранит 30).
+const EVENTS_SHORT = 6;
+let eventsAll = false;
+let eventsList = [];
+
+function drawEvents() {
+  const list = eventsList;
+  if (list.length <= EVENTS_SHORT) eventsAll = false;
+  const shown = eventsAll ? list : list.slice(0, EVENTS_SHORT);
+  const more = $('#ev-more');
+  more.hidden = list.length <= EVENTS_SHORT;
+  const label = eventsAll ? 'Свернуть' : `Показать все (${list.length})`;
+  if (more.textContent !== label) more.textContent = label;
+  more.setAttribute('aria-expanded', String(eventsAll));
+  const key = JSON.stringify([eventsAll, shown.map(e => [fmtWhen(e.t), e.text, e.tone])]);
   if (key === eventsKey) return;
   eventsKey = key;
   const box = $('#events');
   if (!list.length) { box.replaceChildren(h('p', { class: 'ev-empty', text: 'Пока ничего не происходило.' })); return; }
-  box.replaceChildren(...list.slice(0, 6).map(e => h('div', { class: 'ev', 'data-tone': e.tone || null },
+  box.replaceChildren(...shown.map(e => h('div', { class: 'ev', 'data-tone': e.tone || null },
     h('b', { text: fmtWhen(e.t) }), h('span', { text: e.text }))));
 }
+
+$('#ev-more').addEventListener('click', () => { eventsAll = !eventsAll; drawEvents(); });
