@@ -52,7 +52,7 @@ type SystemView struct {
 
 type Task struct {
 	ID       string   `json:"id"`
-	Kind     string   `json:"kind"` // check, install, app
+	Kind     string   `json:"kind"` // check, install, app, git
 	Title    string   `json:"title"`
 	Packages []string `json:"packages,omitempty"`
 	Started  int64    `json:"started"`
@@ -380,6 +380,7 @@ echo "== Готово"
 if [ -f /run/reboot-required ]; then echo "== Для части обновлений нужна перезагрузка сервера"; fi`,
 
 	"app": appUpdateScript,
+	"git": gitUpdateScript,
 }
 
 var errBusy = errors.New("уже выполняется другая задача, дождитесь её окончания")
@@ -474,7 +475,7 @@ func (u *Updates) Task(ctx context.Context) *Task {
 	}
 	u.mu.Unlock()
 	u.invalidate()
-	if cp.Kind == "app" {
+	if cp.Kind == "app" || cp.Kind == "git" {
 		u.apps.Invalidate()
 	}
 	return &cp

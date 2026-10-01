@@ -393,6 +393,9 @@ func (n *Notifier) digest(ctx context.Context) string {
 				continue
 			}
 			what := "новая сборка"
+			if a.Git != nil {
+				what = fmt.Sprintf("новая версия в git (%d %s)", a.Git.Behind, plural(a.Git.Behind, "коммит", "коммита", "коммитов"))
+			}
 			if a.Latest != "" && a.Latest != a.Current {
 				what = "версия " + a.Latest
 				if a.Current != "" {

@@ -157,3 +157,19 @@ func TestDigestSlot(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+func TestParseGitCheck(t *testing.T) {
+	g, msg := parseGitCheck("BRANCH main\nCURRENT 83eebb0\nLATEST a1b2c3d\nBEHIND 2\nAHEAD 0\nDIRTY 1\nLOG Вторая правка\nLOG Первая правка\n")
+	if msg != "" || g == nil || g.Behind != 2 || g.Current != "83eebb0" || g.Latest != "a1b2c3d" || !g.Dirty || g.Diverged || len(g.Commits) != 2 || g.Commits[0] != "Вторая правка" {
+		t.Fatalf("got %+v %q", g, msg)
+	}
+	if g, msg := parseGitCheck("BRANCH main\nCURRENT a\nLATEST b\nBEHIND 1\nAHEAD 1\nDIRTY 0\n"); msg != "" || !g.Diverged {
+		t.Fatalf("diverged not detected: %+v", g)
+	}
+	if g, msg := parseGitCheck("SKIP\n"); g != nil || msg != "" {
+		t.Fatalf("SKIP: %+v %q", g, msg)
+	}
+	if g, msg := parseGitCheck("ERR нет сети\n"); g != nil || msg != "нет сети" {
+		t.Fatalf("ERR: %+v %q", g, msg)
+	}
+}

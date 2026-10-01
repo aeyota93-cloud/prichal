@@ -39,6 +39,8 @@ type App struct {
 	Pinned    bool        `json:"pinned"`
 	Local     bool        `json:"local"` // built on this server, nothing to compare with
 	Self      bool        `json:"self"`
+	Git       *GitInfo    `json:"git,omitempty"`      // checkout of a locally built app
+	GitError  string      `json:"gitError,omitempty"` // why the checkout could not be checked
 	Volumes   []AppVolume `json:"volumes"`
 	Error     string      `json:"error,omitempty"`
 
@@ -189,6 +191,7 @@ func (a *Apps) collect(ctx context.Context) (*AppsView, error) {
 		v.Apps = append(v.Apps, app)
 	}
 	a.checkRemote(ctx, v)
+	a.checkGit(ctx, v)
 	sort.SliceStable(v.Apps, func(i, j int) bool {
 		if v.Apps[i].Update != v.Apps[j].Update {
 			return v.Apps[i].Update

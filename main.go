@@ -119,6 +119,7 @@ func main() {
 	mux.HandleFunc("POST /api/updates/check", s.updatesCheck)
 	mux.HandleFunc("POST /api/updates/install", s.updatesInstall)
 	mux.HandleFunc("POST /api/updates/app", s.updatesApp)
+	mux.HandleFunc("POST /api/updates/git", s.updatesGit)
 	mux.HandleFunc("POST /api/updates/reboot", s.updatesReboot)
 	mux.HandleFunc("GET /api/images", s.images)
 	mux.HandleFunc("POST /api/images/{id}/remove", s.removeImage)
@@ -430,6 +431,18 @@ func (s *server) updatesApp(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := ctxTimeout(r, 120*time.Second)
 	defer cancel()
 	t, err := s.upd.UpdateApp(ctx, in.Key, in.Backup)
+	s.taskReply(w, t, err)
+}
+
+func (s *server) updatesGit(w http.ResponseWriter, r *http.Request) {
+	var in struct{ Key string }
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "не понял запрос"})
+		return
+	}
+	ctx, cancel := ctxTimeout(r, 120*time.Second)
+	defer cancel()
+	t, err := s.upd.UpdateGit(ctx, in.Key)
 	s.taskReply(w, t, err)
 }
 

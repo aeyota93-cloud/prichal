@@ -326,6 +326,7 @@ h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.03em; line
 .up-app-name { min-width: 0; }
 .up-app-name .up-pkg-name { display: block; overflow: hidden; text-overflow: ellipsis; }
 .up-app-status { min-width: 0; }
+.up-commits { margin: 4px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-3); }
 .up-app-note { font-size: 13px; color: var(--ink-3); margin-top: 2px; }
 .up-app-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 .up-app > .confirm { grid-column: 1 / -1; margin: 4px 0 0; }

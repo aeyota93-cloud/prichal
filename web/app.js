@@ -1088,6 +1088,20 @@ function appRow(a) {
   let status, action = '', note = '';
   if (a.error) {
     status = h('p', { class: 'up-muted', text: a.error });
+  } else if (a.git && a.git.behind > 0) {
+    const n = a.git.behind;
+    status = h('div', {},
+      h('p', {}, 'В git ', h('strong', { text: `${n} ${plural(n, 'новый коммит', 'новых коммита', 'новых коммитов')}` }),
+        h('span', { class: 'up-muted', text: ` (${a.git.current} → ${a.git.latest})` })),
+      h('ul', { class: 'up-commits' }, a.git.commits.map(c => h('li', { text: c }))),
+      a.git.dirty ? h('p', { class: 'up-app-note', text: 'На сервере изменены файлы проекта: если они пересекаются с новыми, обновление остановится с ошибкой.' }) : '',
+      a.git.diverged ? h('p', { class: 'up-app-note', text: 'На сервере есть собственные коммиты: обновить отсюда нельзя, нужно слияние вручную.' }) : '');
+    action = h('div', { class: 'up-app-actions' },
+      h('button', { class: 'btn btn-primary', disabled: taskRunning() || a.git.diverged, onclick: () => askUpd('git:' + a.key) }, icon('arrow-down'), 'Обновить'));
+  } else if (a.git) {
+    status = h('p', { class: 'up-muted', text: `Установлена последняя версия из git (${a.git.current}).` });
+  } else if (a.gitError) {
+    status = h('p', { class: 'up-muted', text: `Образ собран на этом сервере. Проверить git не вышло: ${a.gitError}` });
   } else if (a.local) {
     status = h('p', { class: 'up-muted', text: 'Образ собран на этом сервере: сравнивать не с чем.' });
   } else if (a.update) {
@@ -1114,6 +1128,20 @@ function appRow(a) {
       h('p', { class: 'up-muted', text: [appWhere(a), vers && `у вас ${vers}`].filter(Boolean).join(' · ') })),
     h('div', { class: 'up-app-status' }, status, note),
     action);
+  if (upd.confirm === 'git:' + a.key) {
+    li.append(confirmBox({
+      q: `Обновить ${a.title} из git?`,
+      text: [
+        'Скачаю новые коммиты, соберу образ заново и перезапущу.',
+        `${a.title} остановится примерно на минуту.`,
+        a.self ? 'Это сама панель: она пропадёт на минуту и вернётся уже новой. Страница обновится сама, журнал можно открыть снова.' : '',
+        'Если новая версия не запустится, верну прежнюю.',
+      ].filter(Boolean).join(' '),
+      yes: 'Да, обновить',
+      onYes: () => startTask('/api/updates/git', { key: a.key }),
+      onNo: cancelUpd,
+    }));
+  }
   if (upd.confirm === 'app:' + a.key) {
     const backup = wantBackup(a) && a.volumes.length;
     li.append(confirmBox({
