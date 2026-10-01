@@ -1063,7 +1063,7 @@ const GROUPS = [
 ];
 
 const upd = {
-  view: null, error: '', selected: new Set(), log: '', offset: 0, taskId: null, timer: null, confirm: null,
+  view: null, error: '', checking: false, selected: new Set(), log: '', offset: 0, taskId: null, timer: null, confirm: null,
   openGroups: new Set(GROUPS.filter(g => g.open).map(g => g.key)),
   backup: new Map(), // приложение -> делать ли копию данных
 };
@@ -1087,6 +1087,34 @@ async function loadUpdates(fresh = false) {
     $('#up-sum').textContent = `Не удалось получить данные: ${e.message}`;
     renderUpdCard();
   }
+}
+
+// Одна кнопка проверяет всё: приложения и список пакетов сразу, а затем
+// обновляет списки пакетов на сервере (это задача, её ход виден ниже).
+async function checkAll() {
+  if (upd.checking || taskRunning()) return;
+  upd.checking = true;
+  renderCheckButtons();
+  await loadUpdates(true);
+  if (upd.view?.system?.supported && !taskRunning()) await startTask('/api/updates/check');
+  upd.checking = false;
+  renderCheckButtons();
+}
+
+function renderCheckButtons() {
+  const busy = upd.checking || taskRunning();
+  const btn = $('#up-check');
+  btn.disabled = busy;
+  btn.classList.toggle('is-busy', upd.checking);
+  btn.lastElementChild.textContent = upd.checking ? 'Проверяю…' : 'Проверить обновления';
+  document.querySelectorAll('#view-updates .ibtn').forEach(b => { b.disabled = busy; });
+}
+
+$('#up-check').addEventListener('click', checkAll);
+
+// Круглая кнопка без подписи: что она делает, видно в подсказке.
+function iconBtn(title, onclick) {
+  return h('button', { class: 'ibtn', title, 'aria-label': title, disabled: upd.checking || taskRunning(), onclick }, icon('arrows-clockwise'));
 }
 
 function appUpdates(v) {
@@ -1148,6 +1176,7 @@ function renderUpdates() {
   renderPkgs(v);
   renderFoot(sys);
   renderUpdCard();
+  renderCheckButtons();
 }
 
 function askUpd(kind) {
@@ -1246,6 +1275,7 @@ async function pollTask() {
   if (upd.view) upd.view.task = t;
   renderTaskBox();
   renderUpdCard();
+  renderCheckButtons();
   if (t.state === 'running') {
     upd.timer = setTimeout(pollTask, 2000);
   } else if (wasRunning) {
@@ -1399,7 +1429,7 @@ function renderApps(v) {
   const head = h('div', { class: 'block-h' },
     h('h2', { text: 'Приложения' }),
     h('span', { class: 'faint', text: ['docker compose', v.apps && `проверено ${fmtAgo(Date.now() / 1000 - v.apps.checkedAt)}`].filter(Boolean).join(' · ') }),
-    h('button', { class: 'textbtn end', disabled: taskRunning(), onclick: () => loadUpdates(true) }, icon('arrows-clockwise'), 'Проверить'));
+    iconBtn('Проверить приложения', () => loadUpdates(true)));
   const parts = [head];
   if (v.appsError) parts.push(h('p', { class: 'cn-empty', text: `Не удалось проверить: ${v.appsError}` }));
   if (apps.length) parts.push(h('ul', {}, apps.map(appRow)));
@@ -1469,7 +1499,7 @@ function renderPkgs(v) {
   const head = h('div', { class: 'block-h' },
     h('h2', { text: 'Пакеты системы' }),
     h('span', { class: 'faint', text: [sys?.pm, checked].filter(Boolean).join(' · ') }),
-    sys?.supported ? h('button', { class: 'textbtn end', disabled: taskRunning(), onclick: () => startTask('/api/updates/check') }, icon('arrows-clockwise'), 'Проверить обновления') : '');
+    sys?.supported ? iconBtn('Проверить пакеты: обновить их списки на сервере', () => startTask('/api/updates/check')) : '');
   if (v.error) {
     card.replaceChildren(head, h('p', { class: 'cn-empty', text: `Не удалось получить список: ${v.error}` }));
     return;
