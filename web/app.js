@@ -1352,7 +1352,7 @@ function appRow(a) {
     const tag = a.image.split('@')[0].split(':').pop();
     note = h('p', { class: 'app-note', text: `Версия закреплена тегом «${tag}»: новые версии придут, только если поменять тег в docker-compose.` });
   }
-  const li = h('li', { class: 'li app', 'data-tone': tone },
+  const li = h('li', { class: 'li app-row', 'data-tone': tone },
     h('span', { class: 'sdot' }),
     h('div', {},
       h('p', { class: 'li-name', text: a.title }),

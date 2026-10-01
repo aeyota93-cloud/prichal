@@ -81,7 +81,8 @@ ul { padding: 0; list-style: none; }
 .side-foot { margin-top: 18px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-left: 4px; }
 .host { color: var(--ink-3); font-size: 12.5px; }
 
-.main { padding: 40px 48px 90px 24px; max-width: 1240px; width: 100%; min-width: 0; }
+/* на широком экране содержимое стоит по центру, а не прилипает к меню */
+.main { padding: 40px 48px 90px 24px; max-width: 1240px; width: 100%; min-width: 0; justify-self: center; }
 
 /* ---------- Общие детали ---------- */
 .chip { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 99px; font-size: 13.5px; color: var(--ink); white-space: nowrap; }
@@ -359,8 +360,8 @@ ul { padding: 0; list-style: none; }
 .commits { margin: 6px 0 0; padding-left: 16px; list-style: disc; color: var(--ink-3); font-size: 13px; }
 .app-note { color: var(--ink-3); font-size: 13px; margin-top: 4px; }
 .app-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
-.li.app { grid-template-columns: 26px minmax(140px, 220px) minmax(0, 1fr) auto; }
-.li.app > .confirm, .li > .confirm { grid-column: 1 / -1; }
+.li.app-row { grid-template-columns: 26px minmax(140px, 220px) minmax(0, 1fr) auto; }
+.li.app-row > .confirm, .li > .confirm { grid-column: 1 / -1; }
 
 .task { border-radius: 30px; margin: 34px 0 14px; overflow: hidden; }
 .task-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; padding: 14px 14px 14px 26px; list-style: none; cursor: pointer; }
@@ -437,9 +438,9 @@ body.is-offline .view { opacity: .5; }
   .ct-cpu, .ct-time { display: none; }
   .im-list .li { grid-template-columns: 26px minmax(0, 1fr) auto auto; }
   .im-list .li > :nth-child(4), .im-list .li > :nth-child(5) { display: none; }
-  .li.app { grid-template-columns: 26px minmax(0, 1fr); }
-  .li.app > :nth-child(n+3) { grid-column: 2; }
-  .li.app .app-actions { justify-content: flex-start; }
+  .li.app-row { grid-template-columns: 26px minmax(0, 1fr); }
+  .li.app-row > :nth-child(n+3) { grid-column: 2; }
+  .li.app-row .app-actions { justify-content: flex-start; }
 }
 @media (max-width: 820px) {
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
