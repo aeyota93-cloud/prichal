@@ -17,6 +17,9 @@ let inflight = null;
 function setOffline(off) {
   $('#offline').hidden = !off;
   document.body.classList.toggle('is-offline', off);
+  // Значок у названия сервера: это связь панели с сервером, не клиенты VPN.
+  $('#ov-live-t').textContent = off ? 'нет связи' : 'в сети';
+  $('#ov-live').dataset.tone = off ? 'idle' : ''; // при связи тон вернёт renderOverview
 }
 
 export async function refresh() {

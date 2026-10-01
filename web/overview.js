@@ -120,7 +120,7 @@ function renderTiles(list) {
   const tiles = sortContainers(list).map(c => {
     const a = about(c), st = statusOf(c);
     return {
-      id: c.id, tone: st.tone, title: a.title,
+      id: c.id, tone: st.tone, title: a.title, status: st.label.toLowerCase(),
       sub: (st.tone === 'ok' ? (connBadge(c.name) || a.sub) : st.label.toLowerCase()) || ' ',
       mem: c.state === 'running' || c.state === 'paused' ? fmtBytes(c.mem) : '',
     };
@@ -128,10 +128,14 @@ function renderTiles(list) {
   const key = JSON.stringify(tiles);
   if (key === tilesKey) return;
   tilesKey = key;
-  $('#tiles').replaceChildren(...tiles.map(t => h('button', { class: 'tile glass', 'data-tone': t.tone, onclick: () => openContainer(t.id) },
+  $('#tiles').replaceChildren(...tiles.map(t => h('button', {
+    class: 'tile glass', 'data-tone': t.tone, onclick: () => openContainer(t.id),
+    'aria-label': `${t.title}, ${t.status}${t.mem ? `, занимает ${t.mem} памяти` : ''}. Открыть`,
+  },
     h('span', { class: 'sdot' }),
     h('div', {}, h('p', { text: t.title }), h('p', { text: t.sub })),
-    h('span', { class: 'num', text: t.mem }))));
+    // У остановленных контейнеров правый блок пуст.
+    h('div', { class: 'tile-mem' }, ...(t.mem ? [h('span', { class: 'num', text: t.mem }), h('span', { text: 'памяти' })] : [])))));
 }
 
 const TG_REASONS = ['контейнер упал или перезапускается по кругу', 'сервер перезагрузился', 'диск заполнен на 85 %', 'свободной памяти меньше 8 %'];

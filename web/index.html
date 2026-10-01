@@ -34,17 +34,10 @@
       <button data-view="overview">Обзор</button>
       <button data-view="containers">Контейнеры <span class="n" id="n-containers"></span></button>
       <button data-view="conns" id="nav-conns">Подключения <span class="n" id="n-conns"></span></button>
-      <button data-view="updates">Обновления <span class="n" id="n-updates"></span></button>
+      <button data-view="updates" id="nav-updates">Обновления <span class="n" id="n-updates"></span></button>
       <button data-view="images">Образы <span class="n" id="n-images"></span></button>
     </nav>
 
-    <section class="upd glass" id="upd-card" aria-label="Обновления">
-      <span class="chip glass">Обновления</span>
-      <div class="upd-big"><b class="num" id="upd-num">…</b><span id="upd-what">проверяю</span></div>
-      <p id="upd-note"></p>
-      <p class="upd-apps" id="upd-apps"></p>
-      <button class="pbtn ghost sm" data-view="updates">Открыть <span data-icon="arrow-right" aria-hidden="true"></span></button>
-    </section>
     <button class="pbtn ghost sm reboot" id="reboot-btn"><span data-icon="power" aria-hidden="true"></span><span>Перезагрузить сервер</span></button>
     <div class="side-foot">
       <p class="host" id="host-line"></p>
@@ -65,7 +58,7 @@
           <div class="hero">
             <div class="chip-row">
               <span class="chip glass" id="ov-label">Сервер</span>
-              <span class="chip glass" id="ov-live"><span class="live"></span>на связи</span>
+              <span class="chip glass" id="ov-live"><span class="live"></span><span id="ov-live-t">в сети</span></span>
             </div>
             <h1 id="ov-title">Загружаю…</h1>
             <p class="sub" id="ov-sub"></p>

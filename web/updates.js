@@ -37,7 +37,7 @@ export async function loadUpdates(fresh = false) {
   } catch (e) {
     upd.error = e.message;
     $('#up-sum').textContent = `Не удалось получить данные: ${e.message}`;
-    renderUpdCard();
+    renderUpdBadge();
   }
 }
 
@@ -74,35 +74,49 @@ function appUpdates(v) {
   return (v?.apps?.apps || []).filter(a => a.update).length;
 }
 
-// Карточка в боковой панели: сколько всего можно обновить.
-function renderUpdCard() {
+// Разбивка обновлений для подсказки бейджа «Обновления» в меню.
+// sys — раздел system из /api/updates, apps — число приложений с новой версией.
+// Берём только те части, что есть: «8 пакетов системы и 1 приложение · есть
+// обновления безопасности · серверу нужна перезагрузка».
+export function updBadgeTitle(sys, apps) {
+  const pk = sys?.supported ? sys.packages.length : 0;
+  const what = [];
+  if (pk) what.push(`${pk} ${plural(pk, 'пакет', 'пакета', 'пакетов')} системы`);
+  if (apps) what.push(`${apps} ${plural(apps, 'приложение', 'приложения', 'приложений')}`);
+  const parts = [];
+  if (what.length) parts.push(what.join(' и '));
+  if (pk && sys.packages.some(p => p.security)) parts.push('есть обновления безопасности');
+  if (sys?.rebootRequired) parts.push('серверу нужна перезагрузка');
+  return parts.join(' · ');
+}
+
+// Бейдж в меню: сколько всего можно обновить. Жёлтый, если есть обновления
+// безопасности или нужна перезагрузка.
+function renderUpdBadge() {
   const v = upd.view;
-  const card = $('#upd-card');
+  const badge = $('#n-updates');
+  const btn = $('#nav-updates');
   if (!v) {
-    $('#upd-num').textContent = upd.error ? '—' : '…';
-    $('#upd-what').textContent = upd.error ? 'не удалось проверить' : 'проверяю';
+    badge.textContent = upd.error ? '' : '…';
+    badge.dataset.tone = '';
+    btn.removeAttribute('title');
+    btn.removeAttribute('aria-label');
     return;
   }
   const sys = v.system;
   const pk = sys?.supported ? sys.packages.length : 0;
-  const ap = appUpdates(v);
-  const total = pk + ap;
-  const running = taskRunning();
-  card.classList.toggle('is-due', total > 0 || !!sys?.rebootRequired);
-  $('#upd-num').textContent = running ? '…' : String(total);
-  $('#upd-what').replaceChildren(...(running ? ['идёт', h('br'), 'установка']
-    : pk ? [plural(pk, 'пакет', 'пакета', 'пакетов'), h('br'), 'системы']
-    : ap ? [plural(ap, 'приложение', 'приложения', 'приложений'), h('br'), 'обновить']
-    : ['всё', h('br'), 'обновлено']));
-  const note = [];
-  if (sys?.packages?.some(p => p.group === 'docker')) note.push(`Docker ${shortVer(sys.packages.find(p => p.name === 'docker-ce')?.to || '').replace(/-.*$/, '')}`.trim());
-  if (sys?.packages?.some(p => p.group === 'kernel')) note.push('ядро');
-  if (sys?.packages?.some(p => p.security)) note.push('безопасность');
-  let noteText = note.length ? `Среди них: ${note.join(', ')}.` : '';
-  if (sys?.rebootRequired) noteText += (noteText ? ' ' : '') + 'Серверу нужна перезагрузка.';
-  $('#upd-note').textContent = noteText;
-  $('#upd-apps').textContent = v.apps ? (ap ? `Приложений с новой версией: ${ap}` : 'Приложения актуальны') : '';
-  $('#n-updates').textContent = total || '';
+  const total = pk + appUpdates(v);
+  const warn = (pk && sys.packages.some(p => p.security)) || !!sys?.rebootRequired;
+  badge.textContent = taskRunning() ? '…' : (total || '');
+  badge.dataset.tone = warn ? 'warn' : '';
+  const tip = updBadgeTitle(sys, appUpdates(v));
+  if (tip) {
+    btn.title = tip;
+    btn.setAttribute('aria-label', `Обновления, ${tip}`);
+  } else {
+    btn.removeAttribute('title');
+    btn.removeAttribute('aria-label');
+  }
   renderHostLine();
 }
 
@@ -113,20 +127,22 @@ function renderUpdates() {
   const pk = sys?.supported ? sys.packages.length : 0;
   const ap = appUpdates(v);
   $('#up-os').textContent = sys ? [sys.os, sys.kernel && `ядро ${sys.kernel.replace(/-generic$/, '')}`].filter(Boolean).join(' · ') : 'Система';
-  $('#up-title').textContent = pk ? `Можно обновить ${pk} ${plural(pk, 'пакет', 'пакета', 'пакетов')}`
+  // Если есть и пакеты, и приложения, заголовок даёт ту же цифру, что и бейдж в меню.
+  $('#up-title').textContent = pk && ap ? `Можно обновить ${pk + ap}`
+    : pk ? `Можно обновить ${pk} ${plural(pk, 'пакет', 'пакета', 'пакетов')}`
     : ap ? `Можно обновить ${ap} ${plural(ap, 'приложение', 'приложения', 'приложений')}`
     : v.error ? 'Обновления' : 'Всё обновлено';
   const parts = [];
   if (v.error) parts.push(`Пакеты: ${v.error}`);
   else if (sys && !sys.supported) parts.push(`Пакетный менеджер ${sys.pm} пока не поддерживается`);
-  if (pk && ap) parts.push(`и ${ap} ${plural(ap, 'приложение', 'приложения', 'приложений')}`);
+  if (pk && ap) parts.push(`${pk} ${plural(pk, 'пакет', 'пакета', 'пакетов')} системы и ${ap} ${plural(ap, 'приложение', 'приложения', 'приложений')}`);
   else if (v.apps && !ap) parts.push('Приложения на последних версиях');
   if (sys?.rebootRequired) parts.push('нужна перезагрузка');
   $('#up-sum').textContent = parts.join(' · ');
   renderTaskBox();
   renderApps(v);
   renderPkgs(v);
-  renderUpdCard();
+  renderUpdBadge();
   renderCheckButtons();
 }
 
@@ -226,7 +242,7 @@ async function pollTask() {
   const wasRunning = taskRunning();
   if (upd.view) upd.view.task = t;
   renderTaskBox();
-  renderUpdCard();
+  renderUpdBadge();
   renderCheckButtons();
   if (t.state === 'running') {
     upd.timer = setTimeout(pollTask, 2000);

@@ -195,7 +195,7 @@ export async function loadConns() {
     conns = new Map(data.services.map(s => [s.container, s]));
     const none = !data.services.length;
     $('#nav-conns').hidden = none;
-    if (none && currentView === 'conns') go('overview');
+    if (none && currentView === 'conns') go('overview', { push: false });
     renderAllConns();
     for (const r of rows.values()) updateRow(r, r.c);
     if (lastOverview) renderOverview(lastOverview);
