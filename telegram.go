@@ -216,6 +216,9 @@ func (t *Telegram) bind(ctx context.Context, onBound func()) {
 			// Confirm the offset so Telegram forgets the handled updates.
 			_ = t.call(ctx, "getUpdates", url.Values{"offset": {fmt.Sprint(offset)}, "timeout": {"0"}}, nil)
 			log.Printf("telegram: bound to @%s", t.username)
+			if ctx.Err() != nil {
+				return // replaced right after binding: its successor greets
+			}
 			onBound()
 			return
 		}

@@ -5,7 +5,6 @@ import { VIEWS } from './views.js';
 
 // ---------- Разделы ----------
 
-export { VIEWS };
 export let currentView = 'overview';
 
 export const viewFromHash = () => Object.keys(VIEWS).find(v => VIEWS[v] === location.hash) || 'overview';

@@ -1,4 +1,4 @@
-import { $, icon } from './dom.js';
+import { icon } from './dom.js';
 import { api } from './api.js';
 import { renderTrack } from './overview.js';
 import { conns, loadConns } from './conns.js';

@@ -212,18 +212,32 @@ func (h *TgHub) stopLocked() {
 	h.bot, h.runCtx, h.cancel = nil, nil, nil
 }
 
+// lookupBot learns the bot's own name for settings that came from .env. It
+// retries while Telegram is unreachable; an answer that says no (bad token)
+// is final.
 func (h *TgHub) lookupBot(ctx context.Context, token string) {
-	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	name, err := h.probe(token).getMe(cctx)
-	if err != nil {
+	for {
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		name, err := h.probe(token).getMe(cctx)
+		cancel()
+		if err == nil {
+			h.mu.Lock()
+			if h.cfg.Token == token && h.cfg.Bot == "" {
+				h.cfg.Bot = name
+			}
+			h.mu.Unlock()
+			return
+		}
 		log.Printf("telegram: %v", err)
-		return
-	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if h.cfg.Token == token && h.cfg.Bot == "" {
-		h.cfg.Bot = name
+		var te *tgError
+		if errors.As(err, &te) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(30 * time.Second):
+		}
 	}
 }
 

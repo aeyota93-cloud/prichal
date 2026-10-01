@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -61,7 +62,7 @@ func TestFailedActionGoesToJournal(t *testing.T) {
 }
 
 func TestFailedImageRemovalAndPruneGoToJournal(t *testing.T) {
-	buildPruneFails := false
+	var buildPruneFails atomic.Bool // the handler runs on another goroutine
 	d := dockerWith(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/images/json":
@@ -71,7 +72,7 @@ func TestFailedImageRemovalAndPruneGoToJournal(t *testing.T) {
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusConflict)
 			w.Write([]byte(`{"message":"image is referenced in multiple repositories"}`))
-		case r.URL.Path == "/build/prune" && buildPruneFails:
+		case r.URL.Path == "/build/prune" && buildPruneFails.Load():
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(`{"message":"disk on fire"}`))
 		default:
@@ -94,7 +95,7 @@ func TestFailedImageRemovalAndPruneGoToJournal(t *testing.T) {
 		t.Errorf("prune with a stuck image: %+v", l)
 	}
 
-	buildPruneFails = true
+	buildPruneFails.Store(true)
 	s.prune(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/", nil))
 	if l := s.journal.List(); len(l) != 3 || l[0].Text != "Очистка не удалась: disk on fire" {
 		t.Errorf("prune failure: %+v", l)

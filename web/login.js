@@ -68,7 +68,7 @@ form.addEventListener('submit', async e => {
     if ([...input.value].length < 8) { fail('Нужно не меньше 8 символов', input); input.focus(); return; }
     if (input.value !== input2.value) { fail('Пароли не совпадают', input2); input2.select(); return; }
   }
-  const btn = form.querySelector('button');
+  const btn = document.getElementById('submit');
   btn.disabled = true;
   try {
     const res = await fetch(setup ? '/api/setup' : '/api/login', {

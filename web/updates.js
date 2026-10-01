@@ -89,7 +89,7 @@ function appUpdates(v) {
 // sys — раздел system из /api/updates, apps — число приложений с новой версией.
 // Берём только те части, что есть: «8 пакетов системы и 1 приложение · есть
 // обновления безопасности · серверу нужна перезагрузка».
-export function updBadgeTitle(sys, apps) {
+function updBadgeTitle(sys, apps) {
   const pk = sys?.supported ? sys.packages.length : 0;
   const what = [];
   if (pk) what.push(`${pk} ${plural(pk, 'пакет', 'пакета', 'пакетов')} системы`);
