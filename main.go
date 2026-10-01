@@ -1,7 +1,8 @@
 // Причал: a small Russian-language panel for a Linux server with Docker.
-// Containers with their health and load, start/stop/kill/restart/pause, logs,
-// images and cleanup, clients of Amnezia VPN, system and app updates,
-// Telegram alerts. Meant to be reached through an SSH tunnel on 127.0.0.1.
+// An overview with a timeline of events, containers with their health and
+// load, start/stop/kill/restart/pause, logs, images and cleanup, clients of
+// Amnezia VPN, system and app updates, server reboot, Telegram alerts. Meant
+// to be reached through an SSH tunnel on 127.0.0.1.
 package main
 
 import (
@@ -42,8 +43,8 @@ func env(k, def string) string {
 	return def
 }
 
-// hostLabel is the server name shown in the header: LABEL, or the host's own
-// hostname.
+// hostLabel is the server name shown on the Overview and in the page title:
+// LABEL, or the host's own hostname.
 func hostLabel(hostRoot string) string {
 	if l := os.Getenv("LABEL"); l != "" {
 		return l

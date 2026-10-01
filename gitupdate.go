@@ -162,7 +162,7 @@ func (u *Updates) UpdateGit(ctx context.Context, key string) (*Task, error) {
 	case app == nil:
 		return nil, errors.New("приложение не найдено, обновите страницу")
 	case app.Git == nil || app.Git.Behind == 0:
-		return nil, errors.New("новой версии в git нет, нажмите «Проверить»")
+		return nil, errors.New("новой версии в git нет, нажмите «Проверить обновления»")
 	case app.Git.Diverged:
 		return nil, errors.New("на сервере есть свои коммиты, обновление без слияния невозможно")
 	}

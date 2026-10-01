@@ -325,7 +325,7 @@ func (n *Notifier) hostLoop(ctx context.Context) {
 			switch {
 			case pct >= 85 && !diskWarned:
 				diskWarned = true
-				n.report("disk", "warn", fmt.Sprintf("Диск заполнен на %.0f%%", pct), fmt.Sprintf("🟠 Диск заполнен на %.0f%%: свободно %s. Очистить неиспользуемое можно в «Причале», вкладка «Образы».", pct, humanBytes(total-used)))
+				n.report("disk", "warn", fmt.Sprintf("Диск заполнен на %.0f%%", pct), fmt.Sprintf("🟠 Диск заполнен на %.0f%%: свободно %s. Очистить неиспользуемое можно в «Причале», раздел «Образы».", pct, humanBytes(total-used)))
 			case pct < 80 && diskWarned:
 				diskWarned = false
 				n.report("disk-ok", "ok", "Место на диске освободилось", fmt.Sprintf("🟢 Место на диске освободилось: занято %.0f%%.", pct))
@@ -433,7 +433,7 @@ func (n *Notifier) digest(ctx context.Context) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	return "📦 <b>Обновления за неделю</b>\n" + strings.Join(lines, "\n") + "\nУстановить можно в «Причале», вкладка «Обновления»."
+	return "📦 <b>Обновления за неделю</b>\n" + strings.Join(lines, "\n") + "\nУстановить можно в «Причале», раздел «Обновления»."
 }
 
 func (n *Notifier) welcome(ctx context.Context) {
