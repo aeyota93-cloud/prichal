@@ -1102,6 +1102,7 @@ async function checkAll() {
 }
 
 function renderCheckButtons() {
+  renderRebootBtn();
   const busy = upd.checking || taskRunning();
   const btn = $('#up-check');
   btn.disabled = busy;
@@ -1170,11 +1171,9 @@ function renderUpdates() {
   else if (v.apps && !ap) parts.push('Приложения на последних версиях');
   if (sys?.rebootRequired) parts.push('нужна перезагрузка');
   $('#up-sum').textContent = parts.join(' · ');
-  renderReboot(sys);
   renderTaskBox();
   renderApps(v);
   renderPkgs(v);
-  renderFoot(sys);
   renderUpdCard();
   renderCheckButtons();
 }
@@ -1198,45 +1197,46 @@ function noAutostart() {
     .map(c => about(c).title);
 }
 
-function rebootConfirm() {
+// Перезагрузка живёт в боковой панели; подтверждение открывается поверх
+// страницы, в узкой колонке ему тесно.
+const rebootDialog = h('dialog', { class: 'modal glass', 'aria-label': 'Перезагрузка сервера' });
+document.body.append(rebootDialog);
+
+function askReboot() {
   const manual = noAutostart();
-  const text = 'Сервер будет недоступен пару минут. Контейнеры с автозапуском поднимутся сами. SSH-туннель оборвётся: через пару минут подключитесь снова.'
+  const sys = upd.view?.system;
+  const what = sys?.rebootRequired && sys.rebootPkgs?.length ? `Её ждут обновления: ${sys.rebootPkgs.join(', ')}. ` : '';
+  const text = what + 'Сервер будет недоступен пару минут. Контейнеры с автозапуском поднимутся сами. SSH-туннель оборвётся: через пару минут подключитесь снова.'
     + (manual.length ? ` Без автозапуска, их придётся запустить вручную: ${manual.join(', ')}.` : '');
-  return confirmBox({ q: 'Перезагрузить сервер сейчас?', text, yes: 'Да, перезагрузить', danger: true, onYes: doReboot, onNo: cancelUpd });
+  rebootDialog.replaceChildren(confirmBox({
+    q: 'Перезагрузить сервер сейчас?', text, yes: 'Да, перезагрузить', danger: true,
+    onYes: () => { rebootDialog.close(); doReboot(); },
+    onNo: () => rebootDialog.close(),
+  }));
+  rebootDialog.showModal();
 }
 
-function renderReboot(sys) {
-  const box = $('#up-reboot');
-  if (!sys?.rebootRequired) { box.replaceChildren(); return; }
-  const what = sys.rebootPkgs.length ? `Обновились: ${sys.rebootPkgs.join(', ')}. ` : '';
-  box.replaceChildren(h('div', { class: 'banner glass' },
-    h('span', { class: 'sdot', 'data-tone': 'warn' }),
-    h('div', { class: 'text' },
-      h('b', { text: 'Серверу нужна перезагрузка' }),
-      h('span', { text: `${what}Новые версии заработают после неё. Сделайте её, когда будет удобно.` })),
-    upd.confirm === 'reboot-banner' ? '' : h('button', { class: 'pbtn white sm', disabled: taskRunning(), onclick: () => askUpd('reboot-banner') }, icon('power'), 'Перезагрузить')),
-  upd.confirm === 'reboot-banner' ? rebootConfirm() : '');
-}
+rebootDialog.addEventListener('click', e => { if (e.target === rebootDialog) rebootDialog.close(); }); // щелчок мимо окна
 
 async function doReboot() {
-  upd.confirm = null;
   try {
     await api('/api/updates/reboot', { method: 'POST' });
     toast('Сервер перезагружается. Через пару минут подключитесь снова.');
   } catch (e) {
     toast(`Не получилось перезагрузить: ${e.message}`, true);
   }
-  renderUpdates();
 }
 
-function renderFoot(sys) {
-  const foot = $('#up-foot');
-  if (sys?.rebootRequired) { foot.replaceChildren(); return; }
-  foot.replaceChildren(
-    pillRow('Перезагрузка', [h('span', { class: 'text', text: 'не требуется' }),
-      upd.confirm === 'reboot-foot' ? '' : h('button', { class: 'pbtn ghost sm', disabled: taskRunning(), onclick: () => askUpd('reboot-foot') }, icon('power'), 'Перезагрузить сервер')]),
-    upd.confirm === 'reboot-foot' ? rebootConfirm() : '');
+function renderRebootBtn() {
+  const btn = $('#reboot-btn');
+  const need = !!upd.view?.system?.rebootRequired;
+  btn.className = 'pbtn sm reboot ' + (need ? 'white' : 'ghost');
+  btn.disabled = taskRunning();
+  btn.lastElementChild.textContent = need ? 'Нужна перезагрузка' : 'Перезагрузить сервер';
+  btn.title = need ? 'Новые версии части пакетов заработают после перезагрузки' : '';
 }
+
+$('#reboot-btn').addEventListener('click', askReboot);
 
 // ----- Задача и её журнал -----
 

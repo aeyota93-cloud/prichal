@@ -78,6 +78,13 @@ ul { padding: 0; list-style: none; }
 .upd p:empty { display: none; }
 .upd .pbtn { justify-self: start; }
 .upd.is-due { border-color: rgb(255 255 255 / .2); }
+.reboot { margin-top: 12px; width: 100%; }
+.modal {
+  width: min(520px, calc(100vw - 32px)); padding: 10px; border-radius: 30px; color: var(--ink);
+  background: rgb(14 14 15 / .92);
+}
+.modal::backdrop { background: rgb(0 0 0 / .55); backdrop-filter: blur(4px); }
+.modal .confirm { border: 0; background: none; }
 .side-foot { margin-top: 18px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-left: 4px; }
 .host { color: var(--ink-3); font-size: 12.5px; }
 
@@ -384,11 +391,6 @@ div.task .task-head { cursor: default; }
 .ibtn .ico { font-size: 17px; }
 .ibtn:hover { background: rgb(255 255 255 / .09); border-color: rgb(255 255 255 / .2); color: var(--ink); }
 .ibtn:disabled { opacity: .4; cursor: default; }
-.banner { display: flex; align-items: center; gap: 18px; padding: 14px 14px 14px 26px; border-radius: 30px; margin: 34px 0 14px; flex-wrap: wrap; }
-.banner .text { flex: 1 1 260px; }
-.banner .text b { display: block; font-weight: 400; font-size: 16px; }
-.banner .text span { color: var(--ink-3); font-size: 13.5px; }
-#up-foot .pill-row { margin-top: 14px; }
 
 /* ---------- Образы ---------- */
 #prune .pill-row { margin-top: 34px; }
