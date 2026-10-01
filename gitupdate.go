@@ -27,17 +27,29 @@ type GitInfo struct {
 }
 
 // gitEnv makes git fail instead of asking questions on a terminal nobody has.
+// Git runs as root here, and a checkout's .git/config can name commands for
+// git to run. So git's own ownership check stays on (a checkout that is not
+// root's is refused unless root added it to safe.directory), and fsmonitor,
+// a speed-up the panel does not need, is off.
 const gitEnv = `export GIT_TERMINAL_PROMPT=0
 git config core.sshCommand >/dev/null 2>&1 || export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=15"
-g() { git -c safe.directory='*' "$@"; }`
+g() { git -c core.fsmonitor= "$@"; }`
 
 // gitCheckScript prints KEY value lines. Argument: working dir.
+// It runs unattended (opening the page, the weekly digest), so hooks are off too.
 const gitCheckScript = `cd "$1" 2>/dev/null || { echo "SKIP"; exit 0; }
 [ -e .git ] || { echo "SKIP"; exit 0; }
 command -v git >/dev/null 2>&1 || { echo "ERR git не установлен на сервере"; exit 0; }
 ` + gitEnv + `
+out=$(g rev-parse --git-dir 2>&1) || {
+  case $out in
+  *"dubious ownership"*) echo "ERR папка принадлежит не root, и git ей не доверяет. Если доверяете, выполните на сервере: git config --global --add safe.directory $1" ;;
+  *) echo "ERR git не открыл папку: $(echo "$out" | head -n 1)" ;;
+  esac
+  exit 0
+}
 up=$(g rev-parse --abbrev-ref '@{u}' 2>/dev/null) || { echo "ERR у ветки нет upstream, нечего сравнивать"; exit 0; }
-out=$(g fetch --quiet 2>&1) || { echo "ERR не удалось связаться с git: $(echo "$out" | tail -n 1)"; exit 0; }
+out=$(g -c core.hooksPath=/dev/null fetch --quiet 2>&1) || { echo "ERR не удалось связаться с git: $(echo "$out" | tail -n 1)"; exit 0; }
 echo "BRANCH $(g rev-parse --abbrev-ref HEAD)"
 echo "CURRENT $(g rev-parse --short HEAD)"
 echo "LATEST $(g rev-parse --short '@{u}')"
