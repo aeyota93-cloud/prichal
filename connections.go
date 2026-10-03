@@ -15,8 +15,10 @@ import (
 
 // Who is connected to the Amnezia services. Every probe is a fixed read-only
 // command run inside the container (the same way the Amnezia app itself looks
-// at the server). Keys, proxy secrets and client IP addresses are dropped here
-// and never reach the browser.
+// at the server). Keys and proxy secrets are dropped here and never reach the
+// browser. WireGuard and OpenVPN client addresses are dropped too; for telemt
+// the device addresses (ips, recentIps) are sent on purpose, to the signed-in
+// owner of the panel only.
 
 const (
 	connCacheFor   = 8 * time.Second

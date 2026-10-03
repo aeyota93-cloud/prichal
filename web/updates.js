@@ -85,6 +85,11 @@ function appUpdates(v) {
   return (v?.apps?.apps || []).filter(a => a.update).length;
 }
 
+// Часть данных не получена: «ничего нет» тогда не значит «всё обновлено».
+function checkFailed(v) {
+  return !!(v?.error || v?.appsError || (v?.apps?.apps || []).some(a => a.error));
+}
+
 // Разбивка обновлений для подсказки бейджа «Обновления» в меню.
 // sys — раздел system из /api/updates, apps — число приложений с новой версией.
 // Берём только те части, что есть: «8 пакетов системы и 1 приложение · есть
@@ -142,12 +147,13 @@ function renderUpdates() {
   $('#up-title').textContent = pk && ap ? `Можно обновить ${pk + ap}`
     : pk ? `Можно обновить ${pk} ${plural(pk, 'пакет', 'пакета', 'пакетов')}`
     : ap ? `Можно обновить ${ap} ${plural(ap, 'приложение', 'приложения', 'приложений')}`
-    : v.error ? 'Обновления' : 'Всё обновлено';
+    : checkFailed(v) ? 'Проверено не всё' : 'Всё обновлено';
   const parts = [];
   if (v.error) parts.push(`Пакеты: ${v.error}`);
   else if (sys && !sys.supported) parts.push(`Пакетный менеджер ${sys.pm} пока не поддерживается`);
+  if (v.appsError) parts.push('приложения не проверены');
   if (pk && ap) parts.push(`${pk} ${plural(pk, 'пакет', 'пакета', 'пакетов')} системы и ${ap} ${plural(ap, 'приложение', 'приложения', 'приложений')}`);
-  else if (v.apps && !ap) parts.push('Приложения на последних версиях');
+  else if (v.apps && !ap && !checkFailed(v)) parts.push('Приложения на последних версиях');
   if (sys?.rebootRequired) parts.push('нужна перезагрузка');
   $('#up-sum').textContent = parts.join(' · ');
   renderTaskBox();
