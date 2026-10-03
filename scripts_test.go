@@ -205,6 +205,10 @@ func TestTaskWrapper(t *testing.T) {
 	if log, exit := run("ok-1", `echo "args: $*"`, "a", "b c"); exit != "0" || log != "args: a b c\n" {
 		t.Errorf("ok: exit %q log %q", exit, log)
 	}
+	// The exit file is renamed into place: nothing half-written stays behind.
+	if tmp, _ := filepath.Glob(filepath.Join(dir, "*.tmp")); len(tmp) != 0 {
+		t.Errorf("leftover temp files: %v", tmp)
+	}
 	// set -e: the first failing command ends the task with its code.
 	if log, exit := run("bad-1", "echo one\nfalse\necho two"); exit == "0" || strings.Contains(log, "two") {
 		t.Errorf("bad: exit %q log %q", exit, log)
