@@ -8,7 +8,7 @@ import (
 )
 
 func TestLabelsPersist(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 	l := LoadLabels(dir)
 	if err := l.Set("amnezia-telemt", "extra_3", "  Мама   телефон "); err != nil {
 		t.Fatal(err)
@@ -30,7 +30,7 @@ func TestLabelsPersist(t *testing.T) {
 // A label is not only for proxy links: clients of AmneziaWG and OpenVPN get
 // one too, by the client's name in Amnezia.
 func TestLabelsForVPNClients(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 	s := &server{conns: &ConnWatcher{labels: LoadLabels(dir)}}
 	for _, c := range []struct{ container, name, label string }{
 		{"amnezia-awg2", "Admin [iOS 27.2]", "Мой ноутбук"},

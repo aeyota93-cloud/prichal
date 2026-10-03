@@ -196,7 +196,7 @@ func TestInstallOnlyListedPackages(t *testing.T) {
 }
 
 func TestTaskLogOffset(t *testing.T) {
-	root := t.TempDir()
+	root := tempDir(t)
 	dir := filepath.Join(root, taskDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)

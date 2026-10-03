@@ -90,19 +90,19 @@ func writeFile(t *testing.T, path, content string) {
 
 func TestTgPrecedence(t *testing.T) {
 	t.Run("nothing set", func(t *testing.T) {
-		st := NewTgHub(t.TempDir(), "", "").Status()
+		st := NewTgHub(tempDir(t), "", "").Status()
 		if st.State != "off" || st.Source != "env" {
 			t.Errorf("got %+v", st)
 		}
 	})
 	t.Run("env only", func(t *testing.T) {
-		st := NewTgHub(t.TempDir(), goodToken, "@Alice_01 ").Status()
+		st := NewTgHub(tempDir(t), goodToken, "@Alice_01 ").Status()
 		if st.State != "waiting" || st.Source != "env" || st.User != "Alice_01" {
 			t.Errorf("got %+v", st)
 		}
 	})
 	t.Run("env with a chat bound before the update", func(t *testing.T) {
-		dir := t.TempDir()
+		dir := tempDir(t)
 		writeFile(t, filepath.Join(dir, "telegram.json"), `{"chatId": 42, "kernel": "6.8.0"}`)
 		h := NewTgHub(dir, goodToken, "alice01")
 		if st := h.Status(); st.State != "on" || st.Source != "env" {
@@ -113,7 +113,7 @@ func TestTgPrecedence(t *testing.T) {
 		}
 	})
 	t.Run("file beats env", func(t *testing.T) {
-		dir := t.TempDir()
+		dir := tempDir(t)
 		writeFile(t, filepath.Join(dir, "telegram-config.json"), `{"token":"`+otherToken+`","username":"bob_the_user","bot":"b_bot"}`)
 		st := NewTgHub(dir, goodToken, "alice01").Status()
 		if st.State != "waiting" || st.Source != "panel" || st.User != "bob_the_user" || st.Bot != "b_bot" {
@@ -121,7 +121,7 @@ func TestTgPrecedence(t *testing.T) {
 		}
 	})
 	t.Run("off beats env", func(t *testing.T) {
-		dir := t.TempDir()
+		dir := tempDir(t)
 		writeFile(t, filepath.Join(dir, "telegram-config.json"), `{"off":true}`)
 		h := NewTgHub(dir, goodToken, "alice01")
 		if st := h.Status(); st.State != "off" || st.Source != "panel" || st.User != "" {
@@ -133,7 +133,7 @@ func TestTgPrecedence(t *testing.T) {
 		}
 	})
 	t.Run("broken file falls back to env", func(t *testing.T) {
-		dir := t.TempDir()
+		dir := tempDir(t)
 		writeFile(t, filepath.Join(dir, "telegram-config.json"), `{not json`)
 		if st := NewTgHub(dir, goodToken, "alice01").Status(); st.Source != "env" || st.State != "waiting" {
 			t.Errorf("got %+v", st)
@@ -142,11 +142,11 @@ func TestTgPrecedence(t *testing.T) {
 }
 
 func TestTgStatusHasNoToken(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 	writeFile(t, filepath.Join(dir, "telegram-config.json"), `{"token":"`+otherToken+`","username":"bob_the_user","bot":"b_bot"}`)
 	for _, h := range []*TgHub{
 		NewTgHub(dir, goodToken, "alice01"),
-		NewTgHub(t.TempDir(), goodToken, "alice01"),
+		NewTgHub(tempDir(t), goodToken, "alice01"),
 	} {
 		b, _ := json.Marshal(h.Status())
 		for _, tok := range []string{goodToken, otherToken, strings.Split(goodToken, ":")[1], strings.Split(otherToken, ":")[1]} {
@@ -156,7 +156,7 @@ func TestTgStatusHasNoToken(t *testing.T) {
 		}
 	}
 	// The overview shows no source.
-	st := NewTgHub(t.TempDir(), goodToken, "alice01").Status()
+	st := NewTgHub(tempDir(t), goodToken, "alice01").Status()
 	st.Source = ""
 	if b, _ := json.Marshal(st); strings.Contains(string(b), "source") {
 		t.Errorf("source in overview: %s", b)
@@ -165,7 +165,7 @@ func TestTgStatusHasNoToken(t *testing.T) {
 
 func TestTgChangeResetsChat(t *testing.T) {
 	f := fakeTelegram(t)
-	dir := t.TempDir()
+	dir := tempDir(t)
 	h := newHub(t, dir, "", "", f)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -203,7 +203,7 @@ func TestTgChangeResetsChat(t *testing.T) {
 
 func TestTgApplyStopsOldBot(t *testing.T) {
 	f := fakeTelegram(t)
-	h := newHub(t, t.TempDir(), "", "", f)
+	h := newHub(t, tempDir(t), "", "", f)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	h.Start(ctx, func() {})
@@ -249,7 +249,7 @@ func TestTgApplyStopsOldBot(t *testing.T) {
 }
 
 func TestTgOffKeepsKernelTracking(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 	h := NewTgHub(dir, "", "")
 	if prev := h.SwapKernel("6.8.0"); prev != "" {
 		t.Errorf("got %q", prev)
@@ -261,7 +261,7 @@ func TestTgOffKeepsKernelTracking(t *testing.T) {
 
 func TestTgEnvBotNameLooked(t *testing.T) {
 	f := fakeTelegram(t)
-	h := newHub(t, t.TempDir(), goodToken, "alice01", f)
+	h := newHub(t, tempDir(t), goodToken, "alice01", f)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	h.Start(ctx, func() {})
@@ -298,7 +298,7 @@ func post(h http.HandlerFunc, body string) (int, string) {
 
 func TestTelegramSave(t *testing.T) {
 	f := fakeTelegram(t)
-	dir := t.TempDir()
+	dir := tempDir(t)
 	s, stop := tgServer(t, dir, f)
 	defer stop()
 	var all strings.Builder // every answer, to look for the token
@@ -400,7 +400,7 @@ func TestTelegramSave(t *testing.T) {
 func TestTelegramSaveNetworkError(t *testing.T) {
 	f := fakeTelegram(t)
 	f.Close() // refused connections put the URL, token included, into the error
-	s, stop := tgServer(t, t.TempDir(), nil)
+	s, stop := tgServer(t, tempDir(t), nil)
 	defer stop()
 	s.tg.api = f.URL
 	code, out := post(s.telegramSave, `{"token":"`+goodToken+`","username":"alice01"}`)

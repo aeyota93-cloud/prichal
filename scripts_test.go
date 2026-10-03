@@ -64,13 +64,13 @@ func runScript(t *testing.T, script string, env []string, args ...string) (out, 
 	if err != nil {
 		t.Skip("no sh")
 	}
-	bin := t.TempDir()
+	bin := tempDir(t)
 	for name, body := range map[string]string{"git": fakeGitScript, "docker": fakeDockerScript} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	logFile := filepath.Join(t.TempDir(), "log")
+	logFile := filepath.Join(tempDir(t), "log")
 	cmd := exec.Command(sh, append([]string{"-c", "set -e\n" + script, "prichal"}, args...)...)
 	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "LOG="+logFile, "PRICHAL_SETTLE=0")
 	cmd.Env = append(cmd.Env, env...)
@@ -80,7 +80,7 @@ func runScript(t *testing.T, script string, env []string, args ...string) (out, 
 }
 
 func TestGitUpdateScript(t *testing.T) {
-	wd := t.TempDir()
+	wd := tempDir(t)
 	files := filepath.Join(wd, "compose.yaml") + "," + filepath.Join(wd, "my dir", "override.yaml")
 
 	out, log, ok := runScript(t, gitUpdateScript, []string{"INSPECT=true false"}, "proj", "web", wd, files)
@@ -111,12 +111,12 @@ func TestGitUpdateScript(t *testing.T) {
 }
 
 func TestAppUpdateScriptBackup(t *testing.T) {
-	wd := t.TempDir()
+	wd := tempDir(t)
 	compose := filepath.Join(wd, "my compose.yaml")
 	if err := os.WriteFile(compose, []byte("services: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	backups := filepath.Join(t.TempDir(), "backups")
+	backups := filepath.Join(tempDir(t), "backups")
 	out, log, ok := runScript(t, appUpdateScript, []string{"PRICHAL_BACKUPS=" + backups},
 		"proj", "web", wd, compose, "1", helperImage, "proj_data")
 	if !ok || !strings.Contains(out, "== Готово") {
@@ -150,7 +150,7 @@ func TestTaskWrapper(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("needs a POSIX sh")
 	}
-	dir := t.TempDir()
+	dir := tempDir(t)
 	run := func(id, script string, args ...string) (string, string) {
 		cmd := exec.Command("sh", append([]string{"-c", taskWrapper(dir, id, script), "prichal"}, args...)...)
 		if out, err := cmd.CombinedOutput(); err != nil {
@@ -172,8 +172,8 @@ func TestTaskWrapper(t *testing.T) {
 // A failed backup must bring the old container back, not recreate it from
 // the freshly pulled image (that would be an update without a backup).
 func TestAppUpdateScriptBackupFails(t *testing.T) {
-	wd := t.TempDir()
-	out, log, ok := runScript(t, appUpdateScript, []string{"PRICHAL_BACKUPS=" + filepath.Join(t.TempDir(), "b"), "FAIL_RUN=1"},
+	wd := tempDir(t)
+	out, log, ok := runScript(t, appUpdateScript, []string{"PRICHAL_BACKUPS=" + filepath.Join(tempDir(t), "b"), "FAIL_RUN=1"},
 		"proj", "web", wd, filepath.Join(wd, "compose.yaml"), "1", helperImage, "proj_data")
 	if ok || !strings.Contains(out, "Запускаю web обратно") {
 		t.Fatalf("failure expected:\n%s\n%s", out, log)

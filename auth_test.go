@@ -62,7 +62,7 @@ func sessionOf(t *testing.T, h http.Handler, c *http.Cookie) map[string]bool {
 }
 
 func TestSetupOnFirstVisit(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 	j := &Journal{}
 	h := testPanel(NewAuth("", dir, j))
 

@@ -7,7 +7,7 @@ import (
 )
 
 func TestJournalOrderLimitAndPersistence(t *testing.T) {
-	dir := t.TempDir()
+	dir := tempDir(t)
 	j := LoadJournal("")
 	for i := 0; i < journalLen+5; i++ {
 		j.Add("", "событие")
