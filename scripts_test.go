@@ -49,7 +49,7 @@ const fakeDockerScript = `#!/bin/sh
 { printf 'docker'; for a in "$@"; do printf ' [%s]' "$a"; done; echo; } >> "$LOG"
 case "$1" in
 compose) for a in "$@"; do [ "$a" = ps ] && echo cid1; done ;;
-inspect) echo "$INSPECT" ;;
+inspect) case "$3" in *.Image*) echo sha256:oldimage ;; *) echo "$INSPECT" ;; esac ;;
 run) [ -z "$FAIL_RUN" ] || exit 125 ;;
 esac
 exit 0
@@ -83,7 +83,7 @@ func TestGitUpdateScript(t *testing.T) {
 	wd := t.TempDir()
 	files := filepath.Join(wd, "compose.yaml") + "," + filepath.Join(wd, "my dir", "override.yaml")
 
-	out, log, ok := runScript(t, gitUpdateScript, []string{"INSPECT=true false"}, "proj", "web", wd, files)
+	out, log, ok := runScript(t, gitUpdateScript, []string{"INSPECT=true false none"}, "proj", "web", wd, files)
 	if !ok || !strings.Contains(out, "== Готово") {
 		t.Fatalf("update failed:\n%s\n%s", out, log)
 	}
@@ -97,8 +97,9 @@ func TestGitUpdateScript(t *testing.T) {
 	}
 
 	// The new version does not come up: back to the old commit.
-	out, log, ok = runScript(t, gitUpdateScript, []string{"INSPECT=false false"}, "proj", "web", wd, files)
-	if ok || !strings.Contains(out, "Возвращаю прежнюю версию") || !strings.Contains(log, "reset --hard oldsha") ||
+	out, log, ok = runScript(t, gitUpdateScript, []string{"INSPECT=false false none"}, "proj", "web", wd, files)
+	// --keep: files edited on the server survive the rollback (--hard deleted them).
+	if ok || !strings.Contains(out, "Возвращаю прежнюю версию") || !strings.Contains(log, "reset --keep oldsha") || strings.Contains(log, "--hard") ||
 		!strings.Contains(log, "[up] [-d] [--build] [web]") {
 		t.Errorf("rollback expected:\n%s\n%s", out, log)
 	}
@@ -110,6 +111,47 @@ func TestGitUpdateScript(t *testing.T) {
 	}
 }
 
+// "Running" is not "ready": a container with a healthcheck must turn healthy,
+// one that stays unhealthy or starting past the deadline fails the update.
+func TestUpdateScriptsWaitForHealth(t *testing.T) {
+	wd := t.TempDir()
+	files := filepath.Join(wd, "compose.yaml")
+	for _, c := range []struct {
+		inspect string
+		wait    string
+		ok      bool
+	}{
+		{"true false healthy", "0", true},
+		{"true false starting", "0", false},
+		{"true false unhealthy", "60", false},
+		{"true true none", "60", false}, // restart loop
+	} {
+		out, log, ok := runScript(t, gitUpdateScript, []string{"INSPECT=" + c.inspect, "PRICHAL_WAIT=" + c.wait}, "proj", "web", wd, files)
+		if ok != c.ok {
+			t.Errorf("git update with %q: ok=%v, want %v\n%s\n%s", c.inspect, ok, c.ok, out, log)
+		}
+		out, log, ok = runScript(t, appUpdateScript, []string{"INSPECT=" + c.inspect, "PRICHAL_WAIT=" + c.wait, "PRICHAL_BACKUPS=" + filepath.Join(t.TempDir(), "b")},
+			"proj", "web", wd, files, "0", helperImage)
+		if ok != c.ok || ok == strings.Contains(out, "Новая версия не заработала") {
+			t.Errorf("app update with %q: ok=%v, want %v\n%s\n%s", c.inspect, ok, c.ok, out, log)
+		}
+	}
+}
+
+// An app update that "succeeds" with a crashed container must fail, keep the
+// crashed container for its log and name the image it ran before.
+func TestAppUpdateScriptNotReady(t *testing.T) {
+	wd := t.TempDir()
+	out, log, ok := runScript(t, appUpdateScript, []string{"INSPECT=false false none", "PRICHAL_BACKUPS=" + filepath.Join(t.TempDir(), "b")},
+		"proj", "web", wd, filepath.Join(wd, "compose.yaml"), "0", helperImage)
+	if ok || !strings.Contains(out, "Новая версия не заработала") || !strings.Contains(out, "sha256:oldimage") {
+		t.Fatalf("failure with the old image named expected:\n%s\n%s", out, log)
+	}
+	if strings.Contains(log, "[start]") || strings.Contains(log, "prune") {
+		t.Errorf("nothing may be started or pruned after a failed update:\n%s", log)
+	}
+}
+
 func TestAppUpdateScriptBackup(t *testing.T) {
 	wd := t.TempDir()
 	compose := filepath.Join(wd, "my compose.yaml")
@@ -117,7 +159,7 @@ func TestAppUpdateScriptBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	backups := filepath.Join(t.TempDir(), "backups")
-	out, log, ok := runScript(t, appUpdateScript, []string{"PRICHAL_BACKUPS=" + backups},
+	out, log, ok := runScript(t, appUpdateScript, []string{"PRICHAL_BACKUPS=" + backups, "INSPECT=true false none"},
 		"proj", "web", wd, compose, "1", helperImage, "proj_data")
 	if !ok || !strings.Contains(out, "== Готово") {
 		t.Fatalf("update failed:\n%s\n%s", out, log)

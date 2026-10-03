@@ -29,9 +29,9 @@ fi
 
 say "== Собираю и запускаю Причал (первый раз это займёт пару минут)"
 docker compose up -d --build
-# Keep the disk tidy: the Go toolchain is only needed while building.
+# Keep the disk tidy. Only dangling images: the build cache of the whole
+# daemon may belong to other projects (the Images tab can clear it).
 docker image prune -f >/dev/null 2>&1 || true
-docker builder prune -f >/dev/null 2>&1 || true
 
 port=$(sed -n 's/^PRICHAL_PORT=\([0-9][0-9]*\).*/\1/p' .env | head -n1)
 port=${port:-9443}

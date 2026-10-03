@@ -6,11 +6,14 @@ project=$1; svc=$2; wd=$3; files=$4; backup=$5; helper=$6; shift 6
 backups=${PRICHAL_BACKUPS:-/var/backups/prichal}
 cd "$wd" || exit 1
 echo "== Скачиваю новую версию ($svc)"
+# The image the container runs now: kept until the update is confirmed.
+old_img=$(docker inspect -f '{{.Image}}' "$(dc ps -q "$svc" | head -n 1)" 2>/dev/null) || old_img=
 dc pull "$svc"
-ok=0
-# On failure the old container starts again as it was: "up" would recreate it
-# from the image just pulled, i.e. update without the backup.
-trap '[ "$ok" = 1 ] || { echo "!! Ошибка. Запускаю $svc обратно"; dc start "$svc" || dc up -d "$svc"; }' EXIT
+ok=0; upped=0
+# Before "up" the old container starts again as it was: "up" would recreate it
+# from the image just pulled, i.e. update without the backup. After "up" the
+# new container stays for its log, and the old image ID is shown.
+trap '[ "$ok" = 1 ] || { if [ "$upped" = 1 ]; then echo "!! Новая версия не заработала. Контейнер оставлен, чтобы посмотреть журнал."; [ -z "$old_img" ] || echo "   Прежняя версия: образ $old_img (данные могли измениться, сверьтесь с README)"; else echo "!! Ошибка. Запускаю $svc обратно"; dc start "$svc" || dc up -d "$svc"; fi; }' EXIT
 if [ "$backup" = 1 ] && [ $# -gt 0 ]; then
   echo "== Останавливаю $svc, чтобы сделать копию данных"
   dc stop "$svc"
@@ -30,6 +33,9 @@ if [ "$backup" = 1 ] && [ $# -gt 0 ]; then
 fi
 echo "== Запускаю новую версию"
 dc up -d "$svc"
+upped=1
+echo "== Проверяю, что запустилась"
+wait_up "$svc" || { echo "!! $svc не поднялся"; exit 1; }
 ok=1
 docker image prune -f >/dev/null 2>&1 || true
 ls -1dt "$backups/$project"/*/ 2>/dev/null | tail -n +6 | xargs -r rm -rf
