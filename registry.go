@@ -84,7 +84,19 @@ func (g *registry) setToken(key, t string) {
 }
 
 func newRegistry() *registry {
-	return &registry{http: &http.Client{Timeout: 20 * time.Second}, tokens: map[string]string{}}
+	return &registry{http: &http.Client{Timeout: 20 * time.Second, CheckRedirect: httpsOnly}, tokens: map[string]string{}}
+}
+
+// httpsOnly follows redirects like the default policy (up to 10), but never
+// to a plain http address.
+func httpsOnly(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return errors.New("реестр перенаправил на незащищённый адрес")
+	}
+	if len(via) >= 10 {
+		return errors.New("слишком много перенаправлений")
+	}
+	return nil
 }
 
 var authParam = regexp.MustCompile(`(\w+)="([^"]*)"`)
@@ -101,14 +113,25 @@ func (g *registry) token(ctx context.Context, challenge string) (string, error) 
 	if p["realm"] == "" {
 		return "", errors.New("реестр не сказал, где взять токен")
 	}
-	q := url.Values{}
+	// The realm comes from the registry's answer: take it only as a plain
+	// https address, so a broken or hostile reply cannot make the panel send
+	// requests to http services of the server's own network.
+	realm, err := url.Parse(p["realm"])
+	if err != nil || realm.Scheme != "https" || realm.Host == "" {
+		return "", errors.New("реестр указал неверный адрес для токена")
+	}
+	q := realm.Query()
 	if p["service"] != "" {
 		q.Set("service", p["service"])
 	}
 	if p["scope"] != "" {
 		q.Set("scope", p["scope"])
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, p["realm"]+"?"+q.Encode(), nil)
+	realm.RawQuery = q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, realm.String(), nil)
+	if err != nil {
+		return "", err
+	}
 	resp, err := g.http.Do(req)
 	if err != nil {
 		return "", err

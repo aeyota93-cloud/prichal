@@ -216,6 +216,40 @@ func TestTaskLogOffset(t *testing.T) {
 	}
 }
 
+// An exit file that is empty or garbled must never turn a task into "done":
+// empty means "not written yet", garbage means failure.
+func TestTaskExitFile(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, taskDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		content string
+		state   string
+		exit    int
+	}{
+		{"", "running", 0},
+		{"\n", "running", 0},
+		{"0\n", "done", 0},
+		{"3\n", "failed", 3},
+		{"oops", "failed", -1},
+		{"0 and more", "failed", -1},
+	} {
+		if err := os.WriteFile(filepath.Join(dir, "x.exit"), []byte(c.content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		u := &Updates{hostRoot: root, task: &Task{ID: "x", Kind: "install", State: "running", Started: time.Now().Unix()}}
+		got := u.Task(context.Background())
+		if got.State != c.state {
+			t.Errorf("exit file %q: state %q, want %q", c.content, got.State, c.state)
+		}
+		if c.state != "running" && (got.Exit == nil || *got.Exit != c.exit) {
+			t.Errorf("exit file %q: exit %v, want %d", c.content, got.Exit, c.exit)
+		}
+	}
+}
+
 func TestSplitRef(t *testing.T) {
 	for in, want := range map[string][2]string{
 		"alpine:3.24":         {"alpine", "3.24"},

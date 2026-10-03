@@ -83,6 +83,7 @@ type Updates struct {
 	task    *Task
 	listMu  sync.Mutex // one host listing at a time
 	startMu sync.Mutex // one task (or reboot) start at a time
+	unitAt  time.Time  // when a task's systemd unit was last looked at
 }
 
 func NewUpdates(d *Docker, apps *Apps, hostRoot, dataDir string) *Updates {
@@ -315,14 +316,18 @@ var errBusy = errors.New("уже выполняется другая задач�
 
 // taskWrapper runs script in a subshell with set -e, writes its output to
 // dir/<id>.log and the exit code to dir/<id>.exit, and keeps the last 20 logs.
+// The exit file appears whole (written aside, then renamed): a reader never
+// sees it empty and mistakes that for success.
 func taskWrapper(dir, id, script string) string {
 	return fmt.Sprintf(`export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a
 mkdir -p %[1]s
 ( set -e
 %[2]s
 ) > %[1]s/%[3]s.log 2>&1
-echo $? > %[1]s/%[3]s.exit
-ls -1t %[1]s/*.log | tail -n +21 | sed 's/\.log$//' | while read -r f; do rm -f "$f.log" "$f.exit"; done`,
+rc=$?
+echo $rc > %[1]s/%[3]s.exit.tmp
+mv %[1]s/%[3]s.exit.tmp %[1]s/%[3]s.exit
+ls -1t %[1]s/*.log | tail -n +21 | sed 's/\.log$//' | while read -r f; do rm -f "$f.log" "$f.exit" "$f.exit.tmp"; done`,
 		dir, script, id)
 }
 
@@ -397,16 +402,21 @@ func (u *Updates) Task(ctx context.Context) *Task {
 		return t
 	}
 	b, err := u.hostFile(ctx, taskDir+"/"+t.ID+".exit")
+	code, exited := 0, false
+	if err == nil {
+		code, exited = parseExit(b)
+	}
 	up := readUptime()
 	cp := *t
 	switch {
-	case err == nil:
-		code, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	case exited:
 		cp.Exit, cp.Finished = &code, time.Now().Unix()
 		cp.State = "done"
 		if code != 0 {
 			cp.State = "failed"
 		}
+	case t.Runner == "systemd" && u.unitStopped(ctx, t.ID) && !u.exitWritten(ctx, t.ID):
+		cp.State, cp.Finished = "interrupted", time.Now().Unix() // the job was killed before it could report
 	case up >= 0 && time.Now().Unix()-t.Started > int64(up)+60:
 		cp.State, cp.Finished = "interrupted", time.Now().Unix() // the server rebooted meanwhile
 	case t.Runner == "container" && !u.docker.Exists(ctx, helperPrefix+"task-"+t.ID):
@@ -439,6 +449,53 @@ func (u *Updates) Task(ctx context.Context) *Task {
 		u.apps.Invalidate()
 	}
 	return &cp
+}
+
+// parseExit reads an exit file. done is false while it holds no number yet
+// (a wrapper of an older version wrote it in place, so it may be caught
+// empty); text that is not a number counts as a failure, never as success.
+func parseExit(b []byte) (code int, done bool) {
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return -1, true
+	}
+	return n, true
+}
+
+func (u *Updates) exitWritten(ctx context.Context, id string) bool {
+	b, err := u.hostFile(ctx, taskDir+"/"+id+".exit")
+	if err != nil {
+		return false
+	}
+	_, done := parseExit(b)
+	return done
+}
+
+// unitStopped says whether the systemd unit of a task is certainly gone: a
+// wrapper killed (OOM, kill -9) leaves no exit file and would stay "running"
+// forever. A failed or unclear look says false. The look costs a helper
+// container, so it is taken at most every 20 seconds.
+func (u *Updates) unitStopped(ctx context.Context, id string) bool {
+	u.mu.Lock()
+	if time.Since(u.unitAt) < 20*time.Second {
+		u.mu.Unlock()
+		return false
+	}
+	u.unitAt = time.Now()
+	u.mu.Unlock()
+	out, _, err := u.docker.HostRun(ctx, "systemctl", "is-active", "prichal-"+id)
+	if err != nil {
+		return false
+	}
+	switch strings.TrimSpace(out) {
+	case "inactive", "failed":
+		return true
+	}
+	return false
 }
 
 // TaskLog returns the job output starting at byte offset.
