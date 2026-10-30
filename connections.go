@@ -81,6 +81,9 @@ type ConnClient struct {
 	IPs       []string `json:"ips,omitempty"`
 	RecentIPs []string `json:"recentIps,omitempty"`
 	Label     string   `json:"label,omitempty"`
+	// telemt only: limits of the link (0 = none); the quota resets every month.
+	MaxDevices int `json:"maxDevices,omitempty"`
+	QuotaGB    int `json:"quotaGB,omitempty"`
 }
 
 type ConnService struct {
@@ -334,6 +337,8 @@ func parseTelemt(raw []byte) ([]ConnClient, error) {
 			ActiveList  []string `json:"active_unique_ips_list"`
 			RecentList  []string `json:"recent_unique_ips_list"`
 			Octets      uint64   `json:"total_octets"`
+			MaxIPs      *int     `json:"max_unique_ips"`
+			QuotaBytes  *uint64  `json:"data_quota_bytes"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil || !resp.OK {
@@ -351,11 +356,18 @@ func parseTelemt(raw []byte) ([]ConnClient, error) {
 				recent = append(recent, ip)
 			}
 		}
-		out = append(out, ConnClient{
+		c := ConnClient{
 			Name: u.Username, Online: u.Connections > 0, Disabled: !u.Enabled,
 			Devices: u.ActiveIPs, Conns: u.Connections, Total: u.Octets,
 			IPs: u.ActiveList, RecentIPs: recent,
-		})
+		}
+		if u.MaxIPs != nil {
+			c.MaxDevices = *u.MaxIPs
+		}
+		if u.QuotaBytes != nil {
+			c.QuotaGB = int(*u.QuotaBytes >> 30)
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }

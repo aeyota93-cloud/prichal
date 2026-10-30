@@ -1,4 +1,4 @@
-import { $, h, icon, toast } from './dom.js';
+import { $, h, icon, toast, confirmBox } from './dom.js';
 import { fmtBytes, fmtAgo, dateFmt, plural } from './format.js';
 import { api } from './api.js';
 import { about } from './model.js';
@@ -64,6 +64,9 @@ function nameCell(s, c) {
   const cell = h('div', { class: 'cl-name-cell' });
   const name = h('p', { class: 'cl-name' }, h('span', { title: t.main, text: t.main }));
   name.append(h('button', { class: 'cl-edit', title: 'Подписать', 'aria-label': `Подписать: ${t.main}`, onclick: () => editLabel(cell, s, c) }, icon('pencil-simple')));
+  if (s.kind === 'telemt') {
+    name.append(h('button', { class: 'cl-edit', title: 'Ссылка, секрет, лимиты', 'aria-label': `Управление: ${t.main}`, onclick: e => openProxyPanel(e.currentTarget.closest('.cl'), s, c) }, icon('dots-three')));
+  }
   cell.append(name, t.sub ? h('p', { class: 'cl-sub', text: t.sub }) : '');
   return cell;
 }
@@ -104,6 +107,8 @@ function connRow(s, c, big) {
     else if (!c.total) seen = 'ещё не использовалась';
     else seen = label;
     if (c.total) traffic = [bytesCell(null, c.total, 'Трафик в обе стороны с запуска прокси')];
+    const lim = limitText(c);
+    if (lim) seen += ` · ${lim}`;
   } else {
     [tone, label] = c.online ? ['ok', 'на связи'] : (c.lastSeen || s.kind === 'openvpn') ? ['idle', 'не на связи'] : ['idle', 'не подключался'];
     seen = label;
@@ -132,8 +137,10 @@ function connBody(s, big) {
     return h('p', { class: 'cn-empty', text: s.state === 'paused' ? 'Контейнер на паузе, данных нет.' : 'Контейнер не работает, данных нет.' });
   }
   if (s.error) return h('p', { class: 'cn-empty', text: `Не удалось получить данные: ${s.error}` });
-  if (!s.clients.length) return h('p', { class: 'cn-empty', text: 'Клиентов пока нет.' });
-  return h('ul', { class: 'cn-list' }, s.clients.map(c => connRow(s, c, big)));
+  const list = s.clients.length
+    ? h('ul', { class: 'cn-list' }, s.clients.map(c => connRow(s, c, big)))
+    : h('p', { class: 'cn-empty', text: 'Клиентов пока нет.' });
+  return s.kind === 'telemt' ? h('div', {}, newLinkBar(s), list) : list;
 }
 
 function connCountText(s) {
@@ -213,4 +220,144 @@ export async function loadConns() {
     $('#cn-sum').textContent = `Не удалось получить данные: ${e.message}`;
   }
   if (document.visibilityState === 'visible') connTimer = setTimeout(loadConns, CONN_MS);
+}
+
+// ---------- Управление ссылками прокси ----------
+// Секрет (а с ним и ссылка) приходит с сервера только по нажатию «Показать ссылку»,
+// после создания или смены секрета. Пока открыта панель, список не перерисовывается.
+
+function limitText(c) {
+  const parts = [];
+  if (c.maxDevices) parts.push(`до ${c.maxDevices} ${plural(c.maxDevices, 'устройства', 'устройств', 'устройств')}`);
+  if (c.quotaGB) parts.push(`${c.quotaGB} ГБ в месяц`);
+  return parts.join(', ');
+}
+
+async function proxyApi(body) {
+  return api('/api/proxy/users', { method: 'POST', body });
+}
+
+// Закрыть панель и сразу перечитать список: изменения видны без ожидания опроса.
+function closeProxyPanel() {
+  editing = null;
+  loadConns();
+}
+
+// Ссылка с кнопкой «Скопировать». Ссылок может быть несколько (разные адреса
+// сервера); первая — основная.
+function linkBox(links) {
+  if (!links || !links.length) return h('p', { class: 'cn-empty', text: 'Прокси не вернул ссылку.' });
+  const copy = async link => {
+    try {
+      await navigator.clipboard.writeText(link);
+      toast('Ссылка скопирована');
+    } catch {
+      toast('Не получилось скопировать: выделите ссылку и скопируйте вручную', true);
+    }
+  };
+  return h('div', { class: 'cl-links' },
+    links.map(l => h('div', { class: 'cl-form' },
+      h('code', { class: 'cl-link', text: l }),
+      h('button', { class: 'pbtn white sm', onclick: () => copy(l) }, 'Скопировать'))),
+    h('p', { class: 'cl-sub', text: 'В ссылке секрет: давайте её только тем, кому доверяете. Открыть ссылку в Telegram — и прокси подключится.' }));
+}
+
+async function runProxy(panel, body, okText) {
+  const out = panel.querySelector('.cl-out');
+  panel.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  try {
+    const res = await proxyApi(body);
+    if (okText) toast(okText);
+    return res;
+  } catch (e) {
+    toast(`Не получилось: ${e.message}`, true);
+    if (out) out.replaceChildren();
+    return null;
+  } finally {
+    panel.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+}
+
+function limitsForm(panel, c, out) {
+  const devices = h('input', { class: 'cl-input cl-num', type: 'number', min: '0', max: '1000', value: String(c.maxDevices || 0), 'aria-label': 'Сколько устройств, 0 — без ограничения' });
+  const quota = h('input', { class: 'cl-input cl-num', type: 'number', min: '0', max: '100000', value: String(c.quotaGB || 0), 'aria-label': 'Сколько гигабайт в месяц, 0 — без ограничения' });
+  const save = async () => {
+    const res = await runProxy(panel, { action: 'limits', name: c.name, maxDevices: Number(devices.value) || 0, quotaGB: Number(quota.value) || 0 }, 'Лимиты сохранены');
+    if (res) closeProxyPanel();
+  };
+  out.replaceChildren(h('div', { class: 'cl-form' },
+    h('span', { class: 'cl-sub', text: 'Устройств' }), devices,
+    h('span', { class: 'cl-sub', text: 'ГБ в месяц' }), quota,
+    h('button', { class: 'pbtn white sm', onclick: save }, 'Сохранить')),
+  h('p', { class: 'cl-sub', text: '0 — без ограничения. Трафик считается с 1-го числа каждого месяца.' }));
+  devices.focus();
+}
+
+function askProxy(panel, out, { q, text, yes, danger, body, okText, showLink }) {
+  out.replaceChildren(confirmBox({
+    q, text, yes, danger,
+    onNo: () => out.replaceChildren(),
+    onYes: async () => {
+      const res = await runProxy(panel, body, okText);
+      if (!res) return;
+      if (showLink) out.replaceChildren(linkBox(res.links));
+      else closeProxyPanel();
+    },
+  }));
+}
+
+function openProxyPanel(li, s, c) {
+  if (!li) return;
+  editing = { container: s.container, name: c.name };
+  li.querySelector('.cl-panel')?.remove();
+  const out = h('div', { class: 'cl-out' });
+  const title = connTitle(s, c).main;
+  const panel = h('div', { class: 'cl-panel' });
+  const acts = h('div', { class: 'cl-acts' },
+    h('button', { class: 'pbtn ghost sm', onclick: async () => {
+      const res = await runProxy(panel, { action: 'link', name: c.name });
+      if (res) out.replaceChildren(linkBox(res.links));
+    } }, 'Показать ссылку'),
+    h('button', { class: 'pbtn ghost sm', onclick: () => askProxy(panel, out, {
+      q: `Сменить секрет у «${title}»?`,
+      text: 'Старая ссылка перестанет работать у всех, кто ею пользуется. Новую нужно будет отправить заново.',
+      yes: 'Сменить секрет', danger: true, body: { action: 'rotate', name: c.name }, okText: 'Секрет сменён', showLink: true,
+    }) }, 'Новый секрет'),
+    h('button', { class: 'pbtn ghost sm', onclick: () => limitsForm(panel, c, out) }, 'Лимиты'),
+    c.disabled
+      ? h('button', { class: 'pbtn ghost sm', onclick: async () => { if (await runProxy(panel, { action: 'enable', name: c.name }, 'Ссылка включена')) closeProxyPanel(); } }, 'Включить')
+      : h('button', { class: 'pbtn ghost sm', onclick: () => askProxy(panel, out, {
+        q: `Отключить «${title}»?`, text: 'Ссылка перестанет работать, пока её снова не включат. Секрет не меняется.',
+        yes: 'Отключить', danger: true, body: { action: 'disable', name: c.name }, okText: 'Ссылка отключена',
+      }) }, 'Отключить'),
+    c.name === 'amnezia' ? '' : h('button', { class: 'pbtn ghost sm', onclick: () => askProxy(panel, out, {
+      q: `Удалить «${title}»?`, text: 'Ссылка перестанет работать навсегда. Вернуть её будет нельзя, только создать новую.',
+      yes: 'Удалить', danger: true, body: { action: 'delete', name: c.name }, okText: 'Ссылка удалена',
+    }) }, 'Удалить'),
+    h('button', { class: 'pbtn ghost sm', onclick: closeProxyPanel }, 'Закрыть'));
+  panel.append(acts, out);
+  li.append(panel);
+}
+
+// «Новая ссылка»: подпись (кому) и кнопка; после создания — сама ссылка.
+function newLinkBar(s) {
+  const bar = h('div', { class: 'cn-new' });
+  const start = () => {
+    editing = { container: s.container, name: '' };
+    const input = h('input', { class: 'cl-input', type: 'text', maxlength: '40', placeholder: 'Для кого, например, Мама', 'aria-label': 'Подпись новой ссылки' });
+    const create = async () => {
+      const res = await runProxy(bar, { action: 'create', label: input.value }, 'Ссылка создана');
+      if (res) bar.replaceChildren(linkBox(res.links), h('button', { class: 'pbtn ghost sm', onclick: closeProxyPanel }, 'Готово'));
+    };
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') create();
+      if (e.key === 'Escape') closeProxyPanel();
+    });
+    bar.replaceChildren(h('div', { class: 'cl-form' }, input,
+      h('button', { class: 'pbtn white sm', onclick: create }, 'Создать'),
+      h('button', { class: 'pbtn ghost sm', onclick: closeProxyPanel }, 'Отмена')));
+    input.focus();
+  };
+  bar.append(h('button', { class: 'pbtn ghost sm', onclick: start }, 'Новая ссылка'));
+  return bar;
 }

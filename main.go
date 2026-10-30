@@ -138,6 +138,7 @@ func main() {
 	mux.HandleFunc("GET /api/containers/{id}/logs", s.logs)
 	mux.HandleFunc("GET /api/connections", s.connections)
 	mux.HandleFunc("POST /api/labels", s.setLabel)
+	mux.HandleFunc("POST /api/proxy/users", s.proxyUser)
 	mux.HandleFunc("GET /api/updates", s.updates)
 	mux.HandleFunc("GET /api/updates/task", s.updatesTask)
 	mux.HandleFunc("POST /api/updates/check", s.updatesCheck)
