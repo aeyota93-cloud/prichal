@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,6 +22,10 @@ import (
 // for a link; the periodic connections probe never carries them.
 
 const telemtContainer = "amnezia-telemt"
+
+// proxyMu runs proxy changes one at a time: two «new link» at once would pick
+// the same extra_N, two «new secret» would hand out a link that is already dead.
+var proxyMu sync.Mutex
 
 var (
 	telemtAPIScript = script("telemt-api.sh")
@@ -46,7 +51,7 @@ type proxyRequest struct {
 	Label  string `json:"label"` // create: the owner's label for the new link
 	// limits: 0 removes the limit
 	MaxDevices int `json:"maxDevices"`
-	QuotaGB    int `json:"quotaGB"` // per calendar month
+	QuotaGB    int `json:"quotaGB"` // in total: telemt 3.5.x has no monthly reset
 }
 
 // telemtCall is one prepared API request: method, path and an optional body.
@@ -87,13 +92,12 @@ func proxyCall(in proxyRequest, users []string) (telemtCall, string, error) {
 	if in.MaxDevices < 0 || in.MaxDevices > 1000 || in.QuotaGB < 0 || in.QuotaGB > 100000 {
 		return telemtCall{}, "", errors.New("лимит вне разумных границ")
 	}
-	body := map[string]any{"max_unique_ips": nil, "data_quota_bytes": nil, "quota_period": nil}
+	body := map[string]any{"max_unique_ips": nil, "data_quota_bytes": nil}
 	if in.MaxDevices > 0 {
 		body["max_unique_ips"] = in.MaxDevices
 	}
 	if in.QuotaGB > 0 {
 		body["data_quota_bytes"] = uint64(in.QuotaGB) << 30
-		body["quota_period"] = "monthly"
 	}
 	return telemtCall{"PATCH", p, body}, in.Name, nil
 }
@@ -223,6 +227,8 @@ func (s *server) proxyUser(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, 4<<10, &in) {
 		return
 	}
+	proxyMu.Lock()
+	defer proxyMu.Unlock()
 	ctx, cancel := ctxTimeout(r, 30*time.Second)
 	defer cancel()
 	list, err := s.docker.Containers(ctx)

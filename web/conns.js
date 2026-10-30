@@ -173,7 +173,7 @@ function renderConns() {
   const scrolled = seg.scrollLeft; // перерисовка не должна сбрасывать прокрутку
   seg.replaceChildren(...services.map(s => {
     const { online, total: t } = s.state === 'running' && !s.error ? connCount(s) : { online: null };
-    return h('button', { 'aria-pressed': String(s.container === connSel), onclick: () => { connSel = s.container; renderConns(); } },
+    return h('button', { 'aria-pressed': String(s.container === connSel), onclick: () => { connSel = s.container; editing = null; busy = false; renderConns(); } },
       about({ name: s.container }).title,
       online == null ? '' : h('span', { class: 'n', text: t == null ? String(online) : `${online}/${t}` }));
   }));
@@ -200,6 +200,9 @@ export function renderRowClients(r) {
 }
 
 function renderAllConns() {
+  // Панель или поле ввода могли исчезнуть со страницы (свернули строку, сменили раздел):
+  // тогда пауза больше не нужна.
+  if (editing && !document.querySelector('.cl-panel, .cl-form .cl-input')) editing = null;
   if (editing) return;
   renderConns();
   for (const r of rows.values()) if (r.open) renderRowClients(r);
@@ -229,7 +232,7 @@ export async function loadConns() {
 function limitText(c) {
   const parts = [];
   if (c.maxDevices) parts.push(`до ${c.maxDevices} ${plural(c.maxDevices, 'устройства', 'устройств', 'устройств')}`);
-  if (c.quotaGB) parts.push(`${c.quotaGB} ГБ в месяц`);
+  if (c.quotaGB) parts.push(`до ${c.quotaGB} ГБ`);
   return parts.join(', ');
 }
 
@@ -262,7 +265,11 @@ function linkBox(links) {
     h('p', { class: 'cl-sub', text: 'В ссылке секрет: давайте её только тем, кому доверяете. Открыть ссылку в Telegram — и прокси подключится.' }));
 }
 
+let busy = false; // пока идёт запрос к прокси, второй не отправляем (Enter, двойной клик)
+
 async function runProxy(panel, body, okText) {
+  if (busy) return null;
+  busy = true;
   const out = panel.querySelector('.cl-out');
   panel.querySelectorAll('button').forEach(b => { b.disabled = true; });
   try {
@@ -274,22 +281,23 @@ async function runProxy(panel, body, okText) {
     if (out) out.replaceChildren();
     return null;
   } finally {
+    busy = false;
     panel.querySelectorAll('button').forEach(b => { b.disabled = false; });
   }
 }
 
 function limitsForm(panel, c, out) {
   const devices = h('input', { class: 'cl-input cl-num', type: 'number', min: '0', max: '1000', value: String(c.maxDevices || 0), 'aria-label': 'Сколько устройств, 0 — без ограничения' });
-  const quota = h('input', { class: 'cl-input cl-num', type: 'number', min: '0', max: '100000', value: String(c.quotaGB || 0), 'aria-label': 'Сколько гигабайт в месяц, 0 — без ограничения' });
+  const quota = h('input', { class: 'cl-input cl-num', type: 'number', min: '0', max: '100000', value: String(c.quotaGB || 0), 'aria-label': 'Сколько гигабайт всего, 0 — без ограничения' });
   const save = async () => {
     const res = await runProxy(panel, { action: 'limits', name: c.name, maxDevices: Number(devices.value) || 0, quotaGB: Number(quota.value) || 0 }, 'Лимиты сохранены');
     if (res) closeProxyPanel();
   };
   out.replaceChildren(h('div', { class: 'cl-form' },
     h('span', { class: 'cl-sub', text: 'Устройств' }), devices,
-    h('span', { class: 'cl-sub', text: 'ГБ в месяц' }), quota,
+    h('span', { class: 'cl-sub', text: 'ГБ всего' }), quota,
     h('button', { class: 'pbtn white sm', onclick: save }, 'Сохранить')),
-  h('p', { class: 'cl-sub', text: '0 — без ограничения. Трафик считается с 1-го числа каждого месяца.' }));
+  h('p', { class: 'cl-sub', text: '0 — без ограничения. Трафик считается с запуска прокси; когда лимит исчерпан, ссылка перестаёт работать.' }));
   devices.focus();
 }
 
