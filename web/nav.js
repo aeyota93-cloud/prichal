@@ -34,9 +34,12 @@ export function go(view, { push = true } = {}) {
 // Классы is-scroll-start / is-scroll-end ставим по прокрутке, размеру и составу ряда.
 export function fadeEdges(el) {
   const update = () => {
+    // Ряд, который не прокручивается (меню-рейка на широком экране), не затухает:
+    // иначе вылезающие за край счётчики дают scrollWidth больше ширины и маска срезает кнопки.
+    const scrolls = getComputedStyle(el).overflowX !== 'visible';
     const max = el.scrollWidth - el.clientWidth;
-    el.classList.toggle('is-scroll-start', el.scrollLeft > 1);
-    el.classList.toggle('is-scroll-end', el.scrollLeft < max - 1);
+    el.classList.toggle('is-scroll-start', scrolls && el.scrollLeft > 1);
+    el.classList.toggle('is-scroll-end', scrolls && el.scrollLeft < max - 1);
   };
   el.addEventListener('scroll', update, { passive: true });
   window.addEventListener('resize', update);
