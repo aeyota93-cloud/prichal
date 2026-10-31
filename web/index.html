@@ -15,14 +15,14 @@
   <aside class="side">
     <p class="brand"><span class="brand-mark" data-icon="anchor-simple" aria-hidden="true"></span><span>Причал<small>управление сервером</small></span></p>
     <nav class="nav" aria-label="Разделы">
-      <button data-view="overview"><span class="nav-label"><span data-icon="hard-drives" aria-hidden="true"></span><span>Обзор</span></span></button>
-      <button data-view="containers"><span class="nav-label"><span data-icon="cube" aria-hidden="true"></span><span>Контейнеры </span></span><span class="n" id="n-containers"></span></button>
-      <button data-view="conns" id="nav-conns"><span class="nav-label"><span data-icon="users-three" aria-hidden="true"></span><span>Подключения </span></span><span class="n" id="n-conns"></span></button>
-      <button data-view="updates" id="nav-updates"><span class="nav-label"><span data-icon="arrow-clockwise" aria-hidden="true"></span><span>Обновления </span></span><span class="n" id="n-updates"></span></button>
-      <button data-view="images"><span class="nav-label"><span data-icon="stack" aria-hidden="true"></span><span>Образы </span></span><span class="n" id="n-images"></span></button>
+      <button title="Обзор" data-view="overview"><span class="nav-label"><span data-icon="hard-drives" aria-hidden="true"></span><span>Обзор</span></span></button>
+      <button title="Контейнеры" data-view="containers"><span class="nav-label"><span data-icon="cube" aria-hidden="true"></span><span>Контейнеры </span></span><span class="n" id="n-containers"></span></button>
+      <button title="Подключения" data-view="conns" id="nav-conns"><span class="nav-label"><span data-icon="users-three" aria-hidden="true"></span><span>Подключения </span></span><span class="n" id="n-conns"></span></button>
+      <button title="Обновления" data-view="updates" id="nav-updates"><span class="nav-label"><span data-icon="arrow-clockwise" aria-hidden="true"></span><span>Обновления </span></span><span class="n" id="n-updates"></span></button>
+      <button title="Образы" data-view="images"><span class="nav-label"><span data-icon="stack" aria-hidden="true"></span><span>Образы </span></span><span class="n" id="n-images"></span></button>
     </nav>
 
-    <button class="pbtn ghost sm reboot" id="reboot-btn"><span data-icon="power" aria-hidden="true"></span><span>Перезагрузить сервер</span></button>
+    <button class="pbtn ghost sm reboot" id="reboot-btn" aria-label="Перезагрузить сервер" title="Перезагрузить сервер"><span data-icon="power" aria-hidden="true"></span><span>Перезагрузить сервер</span></button>
     <div class="side-foot">
       <p class="host" id="host-line"></p>
       <button class="textbtn js-logout" id="logout" hidden><span data-icon="sign-out" aria-hidden="true"></span>Выйти</button>
@@ -114,7 +114,7 @@
         <div class="chip-row"><span class="chip glass" id="up-os">Система</span></div>
         <h1 id="up-title">Обновления</h1>
         <p class="sub" id="up-sum">Загружаю…</p>
-        <div class="hero-actions"><button class="pbtn ghost" id="up-check"><span data-icon="arrows-clockwise" aria-hidden="true"></span><span>Проверить обновления</span></button></div>
+        <div class="hero-actions"><button class="pbtn white" id="up-check"><span data-icon="arrows-clockwise" aria-hidden="true"></span><span>Проверить обновления</span></button></div>
         <p class="up-checked" id="up-checked"></p>
       </div>
       <div id="up-task"></div>

@@ -476,7 +476,7 @@ function pkgRow(p) {
     renderUpdates();
   });
   // Описание пакета приходит по-английски из apt: прячем его в подсказку.
-  return h('li', { class: 'li', title: p.summary || null },
+  return h('li', { class: 'li', 'data-tone': p.security ? 'warn' : 'ok', title: p.summary || null },
     cb,
     h('label', { for: `pkg-${p.name}` },
       h('span', { class: 'li-name' }, p.name, p.security && p.group !== 'security' ? h('span', { class: 'tagline', text: 'безопасность' }) : '')),
