@@ -31,8 +31,10 @@ const (
 	ownProxyContainer = "prichal-proxy"
 )
 
-// ownProxyURL is telemt's API on the private compose network proxy-api.
-var ownProxyURL = "http://" + ownProxyContainer + ":9091"
+// ownProxyURL is telemt's API on the private compose network proxy-api. The
+// alias exists only there: the container name also resolves on «default»,
+// where the API (whitelisted to proxy-api) would drop the connection.
+var ownProxyURL = "http://telemt-api:9091"
 
 var proxyHTTP = &http.Client{Timeout: 15 * time.Second}
 

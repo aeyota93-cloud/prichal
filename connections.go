@@ -141,9 +141,17 @@ func (w *ConnWatcher) Get(ctx context.Context) (*Connections, error) {
 	var out []ConnService
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	ownRunning := false
+	for _, c := range list {
+		ownRunning = ownRunning || (c.Name() == ownProxyContainer && c.State == "running")
+	}
 	for _, c := range list {
 		p, ok := probeFor(c.Name())
 		if !ok {
+			continue
+		}
+		// Moved into Причал: the stopped Amnezia proxy is only a rollback, not a service.
+		if ownRunning && c.Name() == telemtContainer && c.State != "running" {
 			continue
 		}
 		wg.Add(1)

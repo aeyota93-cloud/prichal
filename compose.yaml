@@ -42,7 +42,12 @@ services:
     volumes:
       - ./proxy-data:/data # config.toml (ссылки и секреты), кэш; создаёт install.sh
     # default — выход в интернет к Telegram; proxy-api — только Причал и API прокси.
-    networks: [default, proxy-api]
+    # Имя telemt-api есть только в proxy-api: по имени контейнера Причал мог бы попасть
+    # на адрес из default, а его API не пускает (whitelist — подсеть proxy-api).
+    networks:
+      default: {}
+      proxy-api:
+        aliases: [telemt-api]
     read_only: true
     tmpfs: [/tmp]
     security_opt:
