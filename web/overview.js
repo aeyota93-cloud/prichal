@@ -20,7 +20,8 @@ function trackCpu(cpu) {
 
 function setMeter(id, frac, value, caption, tone) {
   const m = document.getElementById(id);
-  m.style.setProperty('--v', Math.min(1, Math.max(0, frac)).toFixed(3));
+  for (const cls of [...m.classList]) if (cls.startsWith('meter-level-')) m.classList.remove(cls);
+  m.classList.add(`meter-level-${Math.round(Math.min(1, Math.max(0, frac)) * 100)}`);
   m.dataset.tone = tone || '';
   m.querySelector('.m-val').textContent = value;
   document.getElementById(id + '-cap').textContent = caption;
@@ -40,8 +41,7 @@ export function renderTrack(id, values) {
   const v = values.slice(-n);
   const max = Math.max(10, ...v);
   [...tr.children].forEach((d, i) => {
-    d.style.transform = `translateY(${((0.5 - v[i] / max) * 18).toFixed(1)}px)`;
-    d.style.opacity = (0.35 + 0.65 * (i + 1) / n).toFixed(2);
+    d.className = `track-level-${Math.round((0.5 - v[i] / max) * 18) + 9} track-age-${Math.round(10 * (i + 1) / n)}`;
   });
 }
 
