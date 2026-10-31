@@ -48,7 +48,7 @@ esac
 const fakeDockerScript = `#!/bin/sh
 { printf 'docker'; for a in "$@"; do printf ' [%s]' "$a"; done; echo; } >> "$LOG"
 case "$1" in
-compose) for a in "$@"; do [ "$a" = ps ] && echo cid1; done ;;
+compose) case " $* " in *" --services "*) printf '%s' "$SERVICES" ;; *) for a in "$@"; do [ "$a" = ps ] && echo cid1; done ;; esac ;;
 inspect) case "$3" in *.Image*) echo sha256:oldimage ;; *) echo "$INSPECT" ;; esac ;;
 run) [ -z "$FAIL_RUN" ] || exit 125 ;;
 esac
@@ -108,6 +108,23 @@ func TestGitUpdateScript(t *testing.T) {
 	_, log, ok = runScript(t, gitUpdateScript, []string{"FAIL_PULL=1"}, "proj", "web", wd, files)
 	if ok || strings.Contains(log, "reset") || strings.Contains(log, "[build]") {
 		t.Errorf("failed pull must stop before building:\n%s", log)
+	}
+}
+
+// Other running services of the project (Причал's own proxy) are rebuilt from
+// the same checkout; the updated service itself is not built twice.
+func TestGitUpdateRebuildsRunningSiblings(t *testing.T) {
+	wd := t.TempDir()
+	files := filepath.Join(wd, "compose.yaml")
+	out, log, ok := runScript(t, gitUpdateScript, []string{"INSPECT=true false none", "SERVICES=web\nproxy\n"}, "proj", "web", wd, files)
+	if !ok || !strings.Contains(out, "== Обновляю и proxy") {
+		t.Fatalf("sibling not updated:\n%s\n%s", out, log)
+	}
+	if !strings.Contains(log, "[build] [proxy]") || !strings.Contains(log, "[up] [-d] [proxy]") {
+		t.Errorf("proxy must be built and started:\n%s", log)
+	}
+	if strings.Count(log, "[build] [web]") != 1 {
+		t.Errorf("web built more than once:\n%s", log)
 	}
 }
 

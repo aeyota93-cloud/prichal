@@ -16,7 +16,7 @@ let connSel = null; // какой сервис открыт в разделе
 let segShown = null; // для какого сервиса сегмент уже прокручен
 
 function linkName(u) {
-  if (u === 'amnezia') return 'Основная ссылка';
+  if (u === 'amnezia' || u === 'main') return 'Основная ссылка';
   const m = /^extra_(\d+)$/.exec(u);
   return m ? `Дополнительная ссылка ${m[1]}` : u;
 }
@@ -290,7 +290,7 @@ function limitsForm(panel, c, out) {
   const devices = h('input', { class: 'cl-input cl-num', type: 'number', min: '0', max: '1000', value: String(c.maxDevices || 0), 'aria-label': 'Сколько устройств, 0 — без ограничения' });
   const quota = h('input', { class: 'cl-input cl-num', type: 'number', min: '0', max: '100000', value: String(c.quotaGB || 0), 'aria-label': 'Сколько гигабайт всего, 0 — без ограничения' });
   const save = async () => {
-    const res = await runProxy(panel, { action: 'limits', name: c.name, maxDevices: Number(devices.value) || 0, quotaGB: Number(quota.value) || 0 }, 'Лимиты сохранены');
+    const res = await runProxy(panel, { container: s.container, action: 'limits', name: c.name, maxDevices: Number(devices.value) || 0, quotaGB: Number(quota.value) || 0 }, 'Лимиты сохранены');
     if (res) closeProxyPanel();
   };
   out.replaceChildren(h('div', { class: 'cl-form' },
@@ -323,24 +323,24 @@ function openProxyPanel(li, s, c) {
   const panel = h('div', { class: 'cl-panel' });
   const acts = h('div', { class: 'cl-acts' },
     h('button', { class: 'pbtn ghost sm', onclick: async () => {
-      const res = await runProxy(panel, { action: 'link', name: c.name });
+      const res = await runProxy(panel, { container: s.container, action: 'link', name: c.name });
       if (res) out.replaceChildren(linkBox(res.links));
     } }, 'Показать ссылку'),
     h('button', { class: 'pbtn ghost sm', onclick: () => askProxy(panel, out, {
       q: `Сменить секрет у «${title}»?`,
       text: 'Старая ссылка перестанет работать у всех, кто ею пользуется. Новую нужно будет отправить заново.',
-      yes: 'Сменить секрет', danger: true, body: { action: 'rotate', name: c.name }, okText: 'Секрет сменён', showLink: true,
+      yes: 'Сменить секрет', danger: true, body: { container: s.container, action: 'rotate', name: c.name }, okText: 'Секрет сменён', showLink: true,
     }) }, 'Новый секрет'),
     h('button', { class: 'pbtn ghost sm', onclick: () => limitsForm(panel, c, out) }, 'Лимиты'),
     c.disabled
-      ? h('button', { class: 'pbtn ghost sm', onclick: async () => { if (await runProxy(panel, { action: 'enable', name: c.name }, 'Ссылка включена')) closeProxyPanel(); } }, 'Включить')
+      ? h('button', { class: 'pbtn ghost sm', onclick: async () => { if (await runProxy(panel, { container: s.container, action: 'enable', name: c.name }, 'Ссылка включена')) closeProxyPanel(); } }, 'Включить')
       : h('button', { class: 'pbtn ghost sm', onclick: () => askProxy(panel, out, {
         q: `Отключить «${title}»?`, text: 'Ссылка перестанет работать, пока её снова не включат. Секрет не меняется.',
-        yes: 'Отключить', danger: true, body: { action: 'disable', name: c.name }, okText: 'Ссылка отключена',
+        yes: 'Отключить', danger: true, body: { container: s.container, action: 'disable', name: c.name }, okText: 'Ссылка отключена',
       }) }, 'Отключить'),
-    c.name === 'amnezia' ? '' : h('button', { class: 'pbtn ghost sm', onclick: () => askProxy(panel, out, {
+    c.name === 'amnezia' && s.container === 'amnezia-telemt' ? '' : h('button', { class: 'pbtn ghost sm', onclick: () => askProxy(panel, out, {
       q: `Удалить «${title}»?`, text: 'Ссылка перестанет работать навсегда. Вернуть её будет нельзя, только создать новую.',
-      yes: 'Удалить', danger: true, body: { action: 'delete', name: c.name }, okText: 'Ссылка удалена',
+      yes: 'Удалить', danger: true, body: { container: s.container, action: 'delete', name: c.name }, okText: 'Ссылка удалена',
     }) }, 'Удалить'),
     h('button', { class: 'pbtn ghost sm', onclick: closeProxyPanel }, 'Закрыть'));
   panel.append(acts, out);
@@ -354,7 +354,7 @@ function newLinkBar(s) {
     editing = { container: s.container, name: '' };
     const input = h('input', { class: 'cl-input', type: 'text', maxlength: '40', placeholder: 'Для кого, например, Мама', 'aria-label': 'Подпись новой ссылки' });
     const create = async () => {
-      const res = await runProxy(bar, { action: 'create', label: input.value }, 'Ссылка создана');
+      const res = await runProxy(bar, { container: s.container, action: 'create', label: input.value }, 'Ссылка создана');
       if (res) bar.replaceChildren(linkBox(res.links), h('button', { class: 'pbtn ghost sm', onclick: closeProxyPanel }, 'Готово'));
     };
     input.addEventListener('keydown', e => {

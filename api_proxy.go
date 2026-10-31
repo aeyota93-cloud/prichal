@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -15,13 +18,23 @@ import (
 	"time"
 )
 
-// Managing the links of the Amnezia Telegram proxy (telemt) from the panel:
-// a new link, show/copy a link, a new secret, off/on, delete and limits.
-// Every call is one request to telemt's own control API inside its container
-// (scripts/telemt-api.sh). Secrets reach the browser only when the owner asks
-// for a link; the periodic connections probe never carries them.
+// Managing the links of a Telegram proxy (telemt) from the panel: a new link,
+// show/copy a link, a new secret, off/on, delete and limits. Two proxies are
+// known: Причал's own (compose service «proxy», container prichal-proxy), driven
+// over a private network with a password, and the one the Amnezia app creates
+// (amnezia-telemt), driven through `docker exec` (scripts/telemt-api.sh).
+// Secrets reach the browser only when the owner asks for a link; the periodic
+// connections probe never carries them.
 
-const telemtContainer = "amnezia-telemt"
+const (
+	telemtContainer   = "amnezia-telemt"
+	ownProxyContainer = "prichal-proxy"
+)
+
+// ownProxyURL is telemt's API on the private compose network proxy-api.
+var ownProxyURL = "http://" + ownProxyContainer + ":9091"
+
+var proxyHTTP = &http.Client{Timeout: 15 * time.Second}
 
 // proxyMu runs proxy changes one at a time: two «new link» at once would pick
 // the same extra_N, two «new secret» would hand out a link that is already dead.
@@ -46,9 +59,10 @@ var proxyVerb = map[string]string{
 }
 
 type proxyRequest struct {
-	Action string `json:"action"`
-	Name   string `json:"name"`  // telemt user; empty for create
-	Label  string `json:"label"` // create: the owner's label for the new link
+	Container string `json:"container"` // amnezia-telemt or prichal-proxy; empty: the one that runs
+	Action    string `json:"action"`
+	Name      string `json:"name"`  // telemt user; empty for create
+	Label     string `json:"label"` // create: the owner's label for the new link
 	// limits: 0 removes the limit
 	MaxDevices int `json:"maxDevices"`
 	QuotaGB    int `json:"quotaGB"` // in total: telemt 3.5.x has no monthly reset
@@ -74,6 +88,9 @@ func proxyCall(in proxyRequest, users []string) (telemtCall, string, error) {
 	if !proxyUserRe.MatchString(in.Name) || !contains(users, in.Name) {
 		return telemtCall{}, "", errors.New("нет такой ссылки")
 	}
+	if in.Action == "delete" && len(users) <= 1 {
+		return telemtCall{}, "", errors.New("последнюю ссылку удалить нельзя: сначала создайте новую")
+	}
 	p := "/v1/users/" + url.PathEscape(in.Name)
 	switch in.Action {
 	case "link":
@@ -83,7 +100,7 @@ func proxyCall(in proxyRequest, users []string) (telemtCall, string, error) {
 	case "enable", "disable":
 		return telemtCall{"POST", p + "/" + in.Action, nil}, in.Name, nil
 	case "delete":
-		if in.Name == "amnezia" {
+		if in.Name == "amnezia" && in.Container != ownProxyContainer {
 			return telemtCall{}, "", errors.New("основную ссылку удалить нельзя: её выдаёт Amnezia")
 		}
 		return telemtCall{"DELETE", p, nil}, in.Name, nil
@@ -174,6 +191,44 @@ func parseTelemtReply(raw []byte) (telemtUser, error) {
 	return u, nil
 }
 
+// telemtDo sends one API call to the proxy in container c.
+func (s *server) telemtDo(ctx context.Context, c *ContainerSummary, call telemtCall) ([]byte, error) {
+	if c.Name() == ownProxyContainer {
+		return telemtHTTP(ctx, call)
+	}
+	return s.telemtExec(ctx, c.ID, call)
+}
+
+// telemtHTTP calls Причал's own proxy. The password comes from .env
+// (PROXY_API_TOKEN, written by install.sh into both .env and the proxy config).
+func telemtHTTP(ctx context.Context, c telemtCall) ([]byte, error) {
+	var body io.Reader
+	if c.body != nil {
+		b, err := json.Marshal(c.body)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, c.method, ownProxyURL+c.path, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+os.Getenv("PROXY_API_TOKEN"))
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := proxyHTTP.Do(req)
+	if err != nil {
+		return nil, errors.New("прокси не отвечает")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, errors.New("прокси не принял пароль API: проверьте PROXY_API_TOKEN и перезапустите ./install.sh")
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+}
+
 func (s *server) telemtExec(ctx context.Context, id string, c telemtCall) ([]byte, error) {
 	cmd := []string{"sh", "-c", telemtAPIScript, "telemt-api", c.method, c.path}
 	if c.body != nil {
@@ -187,8 +242,8 @@ func (s *server) telemtExec(ctx context.Context, id string, c telemtCall) ([]byt
 }
 
 // proxyUsers is the list of link names telemt has right now.
-func (s *server) proxyUsers(ctx context.Context, id string) ([]string, error) {
-	raw, err := s.telemtExec(ctx, id, telemtCall{method: "GET", path: "/v1/users"})
+func (s *server) proxyUsers(ctx context.Context, c *ContainerSummary) ([]string, error) {
+	raw, err := s.telemtDo(ctx, c, telemtCall{method: "GET", path: "/v1/users"})
 	if err != nil {
 		return nil, err
 	}
@@ -208,10 +263,39 @@ func (s *server) proxyUsers(ctx context.Context, id string) ([]string, error) {
 	return out, nil
 }
 
+// pickProxy chooses the proxy container for a request: the named one, or the
+// panel's own proxy before Amnezia's when none is named. Only running ones.
+func pickProxy(list []ContainerSummary, want string) *ContainerSummary {
+	if want != "" && want != ownProxyContainer && want != telemtContainer {
+		return nil
+	}
+	var own, amnezia *ContainerSummary
+	for i := range list {
+		if list[i].State != "running" {
+			continue
+		}
+		switch list[i].Name() {
+		case ownProxyContainer:
+			own = &list[i]
+		case telemtContainer:
+			amnezia = &list[i]
+		}
+	}
+	switch {
+	case want == ownProxyContainer:
+		return own
+	case want == telemtContainer:
+		return amnezia
+	case own != nil:
+		return own
+	}
+	return amnezia
+}
+
 // proxyLinkName is how the timeline names a link (the same as the page does).
 func proxyLinkName(name, label string) string {
 	base := name
-	if name == "amnezia" {
+	if name == "amnezia" || name == "main" {
 		base = "Основная ссылка"
 	} else if m := extraRe.FindStringSubmatch(name); m != nil {
 		base = "Дополнительная ссылка " + m[1]
@@ -236,17 +320,13 @@ func (s *server) proxyUser(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	id := ""
-	for _, c := range list {
-		if c.Name() == telemtContainer && c.State == "running" {
-			id = c.ID
-		}
-	}
-	if id == "" {
+	pc := pickProxy(list, in.Container)
+	if pc == nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "прокси Telegram не запущен"})
 		return
 	}
-	users, err := s.proxyUsers(ctx, id)
+	container := pc.Name()
+	users, err := s.proxyUsers(ctx, pc)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
 		return
@@ -256,12 +336,12 @@ func (s *server) proxyUser(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-	label := s.conns.labels.Get(telemtContainer, name)
+	label := s.conns.label(container, name)
 	if in.Action == "create" {
 		label = strings.Join(strings.Fields(in.Label), " ")
 	}
 	what := proxyLinkName(name, label)
-	raw, err := s.telemtExec(ctx, id, call)
+	raw, err := s.telemtDo(ctx, pc, call)
 	var u telemtUser
 	if err == nil {
 		u, err = parseTelemtReply(raw)
@@ -281,12 +361,12 @@ func (s *server) proxyUser(w http.ResponseWriter, r *http.Request) {
 	switch in.Action {
 	case "create":
 		if label != "" {
-			if err := s.conns.labels.Set(telemtContainer, name, label); err != nil {
+			if err := s.conns.labels.Set(container, name, label); err != nil {
 				log.Printf("proxy label %s: %v", name, err)
 			}
 		}
 	case "delete":
-		_ = s.conns.labels.Set(telemtContainer, name, "")
+		_ = s.conns.labels.Set(container, name, "")
 	}
 	if in.Action != "link" {
 		log.Printf("proxy %s %s", in.Action, name)

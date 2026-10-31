@@ -18,6 +18,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /:/host:ro # read-only: disk usage, hostname, update logs
       - prichal-data:/data # labels, Telegram chat, last update task
+    networks: [default, proxy-api]
     read_only: true
     security_opt:
       - no-new-privileges:true
@@ -27,6 +28,40 @@ services:
       options:
         max-size: "1m"
         max-file: "2"
+
+  # Прокси Telegram (telemt) — по желанию: install.sh включает его, если в .env PROXY=1
+  # (тогда там же COMPOSE_PROFILES=proxy, и обновление Причала обновляет и прокси).
+  proxy:
+    profiles: [proxy]
+    build: ./proxy
+    image: prichal-proxy:local
+    container_name: prichal-proxy
+    restart: always
+    ports:
+      - "${PROXY_BIND:-0.0.0.0}:${PROXY_PORT:-443}:8443"
+    volumes:
+      - ./proxy-data:/data # config.toml (ссылки и секреты), кэш; создаёт install.sh
+    # default — выход в интернет к Telegram; proxy-api — только Причал и API прокси.
+    networks: [default, proxy-api]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "1m"
+        max-file: "2"
+
+networks:
+  # Закрытая сеть управления прокси: API telemt пускает только её адреса и только с
+  # паролем PROXY_API_TOKEN (whitelist и auth_header в proxy-data/config.toml).
+  proxy-api:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${PROXY_API_SUBNET:-172.30.207.0/28}
 
 volumes:
   prichal-data:

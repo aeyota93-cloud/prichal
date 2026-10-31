@@ -23,6 +23,16 @@ echo "== Запускаю новую версию"
 dc up -d "$svc"
 echo "== Проверяю, что запустилась"
 wait_up "$svc" || { echo "!! $svc не поднялся"; exit 1; }
+# Other running services of the same project are built from the same checkout
+# (Причал's own Telegram proxy, for one): bring them to the new version too.
+# Stopped ones stay stopped on purpose.
+for other in $(dc ps --services --status running); do
+  [ "$other" = "$svc" ] && continue
+  echo "== Обновляю и $other"
+  dc build "$other"
+  dc up -d "$other"
+  wait_up "$other" || { echo "!! $other не поднялся"; exit 1; }
+done
 ok=1
 docker image prune -f >/dev/null 2>&1 || true
 echo "== Готово"

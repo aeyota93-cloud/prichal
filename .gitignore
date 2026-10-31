@@ -9,3 +9,6 @@
 .env
 *.env
 !.env.example
+
+# Прокси Telegram: config.toml с секретами ссылок
+/proxy-data/

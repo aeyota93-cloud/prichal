@@ -33,8 +33,12 @@ type probe struct {
 // Every Amnezia protocol lives in a container with a fixed name prefix; the
 // probe scripts are scripts/wg.sh, openvpn.sh and telemt.sh.
 
-// probeFor picks how to ask an Amnezia container about its clients.
+// probeFor picks how to ask an Amnezia container about its clients. Причал's
+// own proxy is asked over HTTP (cmd is nil, see Get).
 func probeFor(name string) (probe, bool) {
+	if name == ownProxyContainer {
+		return probe{"telemt", nil}, true
+	}
 	if !strings.HasPrefix(name, "amnezia-") {
 		return probe{}, false
 	}
@@ -107,6 +111,16 @@ type ConnWatcher struct {
 	snap   *Connections
 }
 
+// label is the owner's label for a client. Links moved from the Amnezia proxy
+// into Причал's own keep their names, so their old labels still apply until a
+// new one is set.
+func (w *ConnWatcher) label(container, name string) string {
+	if l := w.labels.Get(container, name); l != "" || container != ownProxyContainer {
+		return l
+	}
+	return w.labels.Get(telemtContainer, name)
+}
+
 // Invalidate drops the cached snapshot, e.g. after a label was changed.
 func (w *ConnWatcher) Invalidate() {
 	w.mu.Lock()
@@ -138,13 +152,19 @@ func (w *ConnWatcher) Get(ctx context.Context) (*Connections, error) {
 			s := ConnService{Container: c.Name(), Kind: p.kind, State: c.State, Clients: []ConnClient{}}
 			if c.State == "running" {
 				ectx, cancel := context.WithTimeout(ctx, 8*time.Second)
-				raw, err := w.docker.Exec(ectx, c.ID, p.cmd)
+				var raw []byte
+				var err error
+				if p.cmd == nil {
+					raw, err = telemtHTTP(ectx, telemtCall{method: "GET", path: "/v1/stats/users"})
+				} else {
+					raw, err = w.docker.Exec(ectx, c.ID, p.cmd)
+				}
 				cancel()
 				if err == nil {
 					s.Clients, err = parseProbe(p.kind, raw, time.Now().Unix())
 				}
 				for i := range s.Clients {
-					s.Clients[i].Label = w.labels.Get(s.Container, s.Clients[i].Name)
+					s.Clients[i].Label = w.label(s.Container, s.Clients[i].Name)
 				}
 				if err != nil {
 					s.Error = err.Error()

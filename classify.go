@@ -33,6 +33,7 @@ var amneziaNames = map[string]Identity{
 var knownImages = map[string]Identity{
 	"prichal":                       {"Причал", "панель", "app"},
 	"aeyota93-cloud/prichal":        {"Причал", "панель", "app"},
+	"prichal-proxy":                 {"Прокси Telegram", "Причал", "proxy"},
 	"n8nio/n8n":                     {"n8n", "автоматизации", "app"},
 	"portainer/portainer-ce":        {"Portainer", "управление Docker", "app"},
 	"portainer/portainer-ee":        {"Portainer", "управление Docker", "app"},
